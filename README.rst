@@ -18,7 +18,7 @@ If you'd like to run from the master branch, you can clone the git repo:
 For developer information please see
 `HACKING.rst <https://github.com/openstack/cinder/blob/master/HACKING.rst>`_
 
-You can raise bugs here http://bugs.launchpad.net/cinder
+You can raise bugs here http://bugs.launchpad.net/cinder/
 
 Python client
 -------------
