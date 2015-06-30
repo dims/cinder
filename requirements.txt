@@ -13,19 +13,19 @@ keystonemiddleware>=1.5.0
 kombu>=3.0.7
 lxml>=2.3
 netaddr>=0.7.12
-oslo.config>=1.11.0 # Apache-2.0
-oslo.concurrency>=2.1.0 # Apache-2.0
-oslo.context>=0.2.0 # Apache-2.0
-oslo.db>=1.10.0 # Apache-2.0
-oslo.log>=1.2.0 # Apache-2.0
-oslo.messaging!=1.12.0,>=1.8.0 # Apache-2.0
-oslo.middleware!=2.0.0,>=1.2.0 # Apache-2.0
-oslo.policy>=0.5.0 # Apache-2.0
-oslo.rootwrap>=2.0.0 # Apache-2.0
-oslo.serialization>=1.4.0 # Apache-2.0
-oslo.service>=0.1.0 # Apache-2.0
-oslo.utils>=1.6.0 # Apache-2.0
-oslo.versionedobjects>=0.3.0
+-e git+https://github.com/openstack/oslo.config.git#egg=oslo.config
+-e git+https://github.com/openstack/oslo.concurrency.git#egg=oslo.concurrency
+-e git+https://github.com/openstack/oslo.context.git#egg=oslo.context
+-e git+https://github.com/openstack/oslo.db.git#egg=oslo.db
+-e git+https://github.com/openstack/oslo.log.git#egg=oslo.log
+-e git+https://github.com/openstack/oslo.messaging.git#egg=oslo.messaging
+-e git+https://github.com/openstack/oslo.middleware.git#egg=oslo.middleware
+-e git+https://github.com/openstack/oslo.policy.git#egg=oslo.policy
+-e git+https://github.com/openstack/oslo.rootwrap.git#egg=oslo.rootwrap
+-e git+https://github.com/openstack/oslo.serialization.git#egg=oslo.serialization
+-e git+https://github.com/openstack/oslo.service.git#egg=oslo.service
+-e git+https://github.com/openstack/oslo.utils.git#egg=oslo.utils
+-e git+https://github.com/openstack/oslo.versionedobjects.git#egg=oslo.versionedobjects
 osprofiler>=0.3.0 # Apache-2.0
 paramiko>=1.13.0
 Paste
@@ -48,6 +48,6 @@ sqlalchemy-migrate>=0.9.6
 stevedore>=1.5.0 # Apache-2.0
 suds-jurko>=0.6
 WebOb>=1.2.3
-oslo.i18n>=1.5.0 # Apache-2.0
-oslo.vmware>=0.13.1 # Apache-2.0
+-e git+https://github.com/openstack/oslo.i18n.git#egg=oslo.i18n
+-e git+https://github.com/openstack/oslo.vmware.git#egg=oslo.vmware
 os-brick
