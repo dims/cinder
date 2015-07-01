@@ -19,6 +19,7 @@ properly both upgrading and downgrading, and that no data loss occurs
 if possible.
 """
 
+import logging
 import os
 import uuid
 
@@ -827,7 +828,12 @@ class MigrationsMixin(test_migrations.WalkVersionsMixin):
         self.assertNotIn('allocated', quotas.c)
 
     def test_walk_versions(self):
-        self.walk_versions(True, False)
+        logger = logging.getLogger('migrate.versioning.script.base')
+        try:
+            logger.setLevel(logging.INFO)
+            self.walk_versions(True, False)
+        finally:
+            logger.setLevel(logging.DEBUG)
 
 
 class TestSqliteMigrations(test_base.DbTestCase,
