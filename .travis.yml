@@ -1,9 +1,8 @@
 language: python
-sudo: true
 env:
   - TOXENV=py27
   - TOXENV=pep8
 install:
   - travis_retry pip install tox
 script:
-  - tox
+  - tox -- --concurrency=10
