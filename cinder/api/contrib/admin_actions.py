@@ -285,6 +285,12 @@ class BackupAdminController(AdminController):
                         'error'
                         ])
 
+    def _get(self, *args, **kwargs):
+        return self.backup_api.get(*args, **kwargs)
+
+    def _delete(self, *args, **kwargs):
+        return self.backup_api.delete(*args, **kwargs)
+
     @wsgi.action('os-reset_status')
     def _reset_status(self, req, id, body):
         """Reset status on the resource."""
@@ -303,7 +309,7 @@ class BackupAdminController(AdminController):
         try:
             self.backup_api.reset_status(context=context, backup_id=id,
                                          status=update['status'])
-        except exception.VolumeNotFound as e:
+        except exception.BackupNotFound as e:
             raise exc.HTTPNotFound(explanation=e.msg)
         return webob.Response(status_int=202)
 
