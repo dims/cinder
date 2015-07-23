@@ -139,17 +139,23 @@ class API(base.Base):
         return [srv['host'] for srv in services if not srv['disabled']]
 
     def create(self, context, name, description, volume_id,
-               container, incremental=False, availability_zone=None):
+               container, incremental=False, availability_zone=None,
+               force=False):
         """Make the RPC call to create a volume backup."""
         check_policy(context, 'create')
         volume = self.volume_api.get(context, volume_id)
 
-        if volume['status'] != "available":
+        if volume['status'] not in ["available", "in-use"]:
             msg = (_('Volume to be backed up must be available '
-                     'but the current status is "%s".')
+                     'or in-use, but the current status is "%s".')
                    % volume['status'])
             raise exception.InvalidVolume(reason=msg)
+        elif volume['status'] in ["in-use"] and not force:
+            msg = _('Backing up an in-use volume must use '
+                    'the force flag.')
+            raise exception.InvalidVolume(reason=msg)
 
+        previous_status = volume['status']
         volume_host = volume_utils.extract_host(volume['host'], 'host')
         if not self._is_backup_service_enabled(volume, volume_host):
             raise exception.ServiceNotFound(service_id='cinder-backup')
@@ -212,7 +218,9 @@ class API(base.Base):
                         'incremental backup.')
                 raise exception.InvalidBackup(reason=msg)
 
-        self.db.volume_update(context, volume_id, {'status': 'backing-up'})
+        self.db.volume_update(context, volume_id,
+                              {'status': 'backing-up',
+                               'previous_status': previous_status})
         try:
             kwargs = {
                 'user_id': context.user_id,
@@ -243,7 +251,7 @@ class API(base.Base):
 
         return backup
 
-    def restore(self, context, backup_id, volume_id=None):
+    def restore(self, context, backup_id, volume_id=None, name=None):
         """Make the RPC call to restore a volume backup."""
         check_policy(context, 'restore')
         backup = self.get(context, backup_id)
@@ -259,11 +267,13 @@ class API(base.Base):
         # Create a volume if none specified. If a volume is specified check
         # it is large enough for the backup
         if volume_id is None:
-            name = 'restore_backup_%s' % backup_id
+            if name is None:
+                name = 'restore_backup_%s' % backup_id
+
             description = 'auto-created_from_restore_from_backup'
 
             LOG.info(_LI("Creating volume of %(size)s GB for restore of "
-                         "backup %(backup_id)s"),
+                         "backup %(backup_id)s."),
                      {'size': size, 'backup_id': backup_id},
                      context=context)
             volume = self.volume_api.create(context, size, name, description)

@@ -255,7 +255,7 @@ class BackupsController(wsgi.Controller):
         name = backup.get('name', None)
         description = backup.get('description', None)
         incremental = backup.get('incremental', False)
-
+        force = backup.get('force', False)
         LOG.info(_LI("Creating backup of volume %(volume_id)s in container"
                      " %(container)s"),
                  {'volume_id': volume_id, 'container': container},
@@ -264,7 +264,7 @@ class BackupsController(wsgi.Controller):
         try:
             new_backup = self.backup_api.create(context, name, description,
                                                 volume_id, container,
-                                                incremental)
+                                                incremental, None, force)
         except exception.InvalidVolume as error:
             raise exc.HTTPBadRequest(explanation=error.msg)
         except exception.VolumeNotFound as error:
@@ -287,6 +287,7 @@ class BackupsController(wsgi.Controller):
         context = req.environ['cinder.context']
         restore = body['restore']
         volume_id = restore.get('volume_id', None)
+        name = restore.get('name', None)
 
         LOG.info(_LI("Restoring backup %(backup_id)s to volume %(volume_id)s"),
                  {'backup_id': id, 'volume_id': volume_id},
@@ -295,7 +296,8 @@ class BackupsController(wsgi.Controller):
         try:
             new_restore = self.backup_api.restore(context,
                                                   backup_id=id,
-                                                  volume_id=volume_id)
+                                                  volume_id=volume_id,
+                                                  name=name)
         except exception.InvalidInput as error:
             raise exc.HTTPBadRequest(explanation=error.msg)
         except exception.InvalidVolume as error:
