@@ -15,9 +15,7 @@
 #    under the License.
 #
 
-"""
-Tests for the IBM FlashSystem volume driver.
-"""
+"""Tests for the IBM FlashSystem volume driver."""
 
 import mock
 from oslo_concurrency import processutils
@@ -138,7 +136,9 @@ class FlashSystemManagementSimulator(object):
         return six.text_type(num)
 
     def _cmd_lshost(self, **kwargs):
-        """svcinfo lshost -delim !
+        """lshost command.
+
+        svcinfo lshost -delim !
         svcinfo lshost -delim ! <host>
         """
         if 'obj' not in kwargs:
@@ -238,7 +238,9 @@ class FlashSystemManagementSimulator(object):
         return ('%s' % '\n'.join(objrows), '')
 
     def _cmd_lsnode(self, **kwargs):
-        """svcinfo lsnode -delim !
+        """lsnode command.
+
+        svcinfo lsnode -delim !
         svcinfo lsnode -delim ! <node>
         """
 
@@ -448,7 +450,9 @@ class FlashSystemManagementSimulator(object):
         return ('', '')
 
     def _cmd_mkvdisk(self, **kwargs):
-        """svctask mkvdisk -name <name> -mdiskgrp <mdiskgrp> -iogrp <iogrp>
+        """mkvdisk command.
+
+        svctask mkvdisk -name <name> -mdiskgrp <mdiskgrp> -iogrp <iogrp>
         -size <size> -unit <unit>
         """
 
@@ -507,7 +511,9 @@ class FlashSystemManagementSimulator(object):
         return ('', '')
 
     def _cmd_mkhost(self, **kwargs):
-        """svctask mkhost -force -hbawwpn <wwpn> -name <host_name>
+        """mkhost command.
+
+        svctask mkhost -force -hbawwpn <wwpn> -name <host_name>
         svctask mkhost -force -iscsiname <initiator> -name <host_name>
         """
 
@@ -535,7 +541,9 @@ class FlashSystemManagementSimulator(object):
             return (out, err)
 
     def _cmd_addhostport(self, **kwargs):
-        """svctask addhostport -force -hbawwpn <wwpn> <host>
+        """addhostport command.
+
+        svctask addhostport -force -hbawwpn <wwpn> <host>
         svctask addhostport -force -iscsiname <initiator> <host>
         """
 
@@ -846,10 +854,28 @@ class FlashSystemDriverTestCase(test.TestCase):
         attr_size = float(attributes['capacity']) / units.Gi
         self.assertEqual(float(vol['size']), attr_size)
 
-        # case 2: delete volume
+        # case 2: create volume with empty returning value
+        with mock.patch.object(FlashSystemFakeDriver,
+                               '_ssh') as mock_ssh:
+            mock_ssh.return_value = ("", "")
+            vol1 = self._generate_vol_info(None)
+            self.assertRaises(exception.VolumeBackendAPIException,
+                              self.driver.create_volume, vol1)
+
+        # case 3: create volume with error returning value
+        with mock.patch.object(FlashSystemFakeDriver,
+                               '_ssh') as mock_ssh:
+            mock_ssh.return_value = ("CMMVC6070E",
+                                     "An invalid or duplicated "
+                                     "parameter has been detected.")
+            vol2 = self._generate_vol_info(None)
+            self.assertRaises(exception.VolumeBackendAPIException,
+                              self.driver.create_volume, vol2)
+
+        # case 4: delete volume
         self.driver.delete_volume(vol)
 
-        # case 3: delete volume that doesn't exist (expected not fail)
+        # case 5: delete volume that doesn't exist (expected not fail)
         vol_no_exist = self._generate_vol_info(None)
         self.driver.delete_volume(vol_no_exist)
 

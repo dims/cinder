@@ -36,7 +36,7 @@ from cinder.volume.drivers.san import san
 from cinder.volume import volume_types
 
 
-DRIVER_VERSION = '1.1.0'
+DRIVER_VERSION = '1.1.1'
 AES_256_XTS_CIPHER = 2
 DEFAULT_CIPHER = 3
 EXTRA_SPEC_ENCRYPTION = 'nimble:encryption'
@@ -82,8 +82,11 @@ class NimbleISCSIDriver(san.SanISCSIDriver):
     Version history:
         1.0 - Initial driver
         1.1.0 - Added Extra Spec Capability
+        1.1.1 - Updated VERSION to Nimble driver version
 
     """
+
+    VERSION = DRIVER_VERSION
 
     def __init__(self, *args, **kwargs):
         super(NimbleISCSIDriver, self).__init__(*args, **kwargs)
@@ -191,8 +194,9 @@ class NimbleISCSIDriver(san.SanISCSIDriver):
         return ''.join(random.sample(char_set, length))
 
     def _clone_volume_from_snapshot(self, volume, snapshot):
-        """Clonevolume from snapshot. Extend the volume if the
-           size of the volume is more than the snapshot
+        """Clone volume from snapshot.
+
+        Extend the volume if the size of the volume is more than the snapshot.
         """
         reserve = not self.configuration.san_thin_provision
         self.APIExecutor.clone_vol(volume, snapshot, reserve)
@@ -371,9 +375,7 @@ class NimbleISCSIDriver(san.SanISCSIDriver):
 
 
 def _response_checker(func):
-    """Decorator function to check if the response
-       of an API is positive
-    """
+    """Decorator function to check if the response of an API is positive."""
     @functools.wraps(func)
     def inner_response_checker(self, *args, **kwargs):
         response = func(self, *args, **kwargs)
@@ -391,9 +393,7 @@ def _response_checker(func):
 
 
 def _connection_checker(func):
-    """Decorator to re-establish and
-       re-run the api if session has expired.
-    """
+    """Decorator to re-establish and re-run the api if session has expired."""
     @functools.wraps(func)
     def inner_connection_checker(self, *args, **kwargs):
         for attempts in range(2):
