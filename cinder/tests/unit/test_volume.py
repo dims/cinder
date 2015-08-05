@@ -4796,26 +4796,35 @@ class VolumeTestCase(BaseVolumeTestCase):
                        return_value=(None, None))
     @mock.patch('cinder.volume.drivers.lvm.LVMVolumeDriver.'
                 'create_volume_from_snapshot')
-    def test_create_consistencygroup_from_src(self, mock_create_from_src,
+    @mock.patch('cinder.volume.drivers.lvm.LVMVolumeDriver.'
+                'create_cloned_volume')
+    def test_create_consistencygroup_from_src(self,
+                                              mock_create_cloned_vol,
+                                              mock_create_vol_from_snap,
+                                              mock_create_from_src,
                                               mock_delete_cgsnap,
                                               mock_create_cgsnap,
-                                              mock_delete_cg, mock_create_cg,
-                                              mock_create_volume):
+                                              mock_delete_cg,
+                                              mock_create_cg):
         """Test consistencygroup can be created and deleted."""
         group = tests_utils.create_consistencygroup(
             self.context,
             availability_zone=CONF.storage_availability_zone,
-            volume_type='type1,type2')
+            volume_type='type1,type2',
+            status='available')
         group_id = group['id']
         volume = tests_utils.create_volume(
             self.context,
             consistencygroup_id=group_id,
-            **self.volume_params)
+            status='available',
+            host=CONF.host,
+            size=1)
         volume_id = volume['id']
         cgsnapshot_returns = self._create_cgsnapshot(group_id, volume_id)
         cgsnapshot_id = cgsnapshot_returns[0]['id']
         snapshot_id = cgsnapshot_returns[1]['id']
 
+        # Create CG from source CG snapshot.
         group2 = tests_utils.create_consistencygroup(
             self.context,
             availability_zone=CONF.storage_availability_zone,
@@ -4845,6 +4854,9 @@ class VolumeTestCase(BaseVolumeTestCase):
             'consistencygroup_id': group2_id
         }
         self.assertEqual('available', cg2['status'])
+        self.assertEqual(group2_id, cg2['id'])
+        self.assertEqual(cgsnapshot_id, cg2['cgsnapshot_id'])
+        self.assertIsNone(cg2['source_cgid'])
 
         msg = self.notifier.notifications[2]
         self.assertEqual('consistencygroup.create.start', msg['event_type'])
@@ -4882,8 +4894,34 @@ class VolumeTestCase(BaseVolumeTestCase):
                           self.context,
                           group2_id)
 
+        # Create CG from source CG.
+        group3 = tests_utils.create_consistencygroup(
+            self.context,
+            availability_zone=CONF.storage_availability_zone,
+            volume_type='type1,type2',
+            source_cgid=group_id)
+        group3_id = group3['id']
+        volume3 = tests_utils.create_volume(
+            self.context,
+            consistencygroup_id=group3_id,
+            source_volid=volume_id,
+            **self.volume_params)
+        volume3_id = volume3['id']
+        self.volume.create_volume(self.context, volume3_id)
+        self.volume.create_consistencygroup_from_src(
+            self.context, group3_id, source_cgid=group_id)
+
+        cg3 = db.consistencygroup_get(
+            self.context,
+            group3_id)
+        self.assertEqual('available', cg3['status'])
+        self.assertEqual(group3_id, cg3['id'])
+        self.assertEqual(group_id, cg3['source_cgid'])
+        self.assertIsNone(cg3['cgsnapshot_id'])
+
         self.volume.delete_cgsnapshot(self.context, cgsnapshot_id)
         self.volume.delete_consistencygroup(self.context, group_id)
+        self.volume.delete_consistencygroup(self.context, group3_id)
 
     def test_sort_snapshots(self):
         vol1 = {'id': '1', 'name': 'volume 1',
@@ -4928,6 +4966,51 @@ class VolumeTestCase(BaseVolumeTestCase):
 
         self.assertRaises(exception.InvalidInput,
                           self.volume._sort_snapshots,
+                          volumes, [])
+
+    def test_sort_source_vols(self):
+        vol1 = {'id': '1', 'name': 'volume 1',
+                'source_volid': '1',
+                'consistencygroup_id': '2'}
+        vol2 = {'id': '2', 'name': 'volume 2',
+                'source_volid': '2',
+                'consistencygroup_id': '2'}
+        vol3 = {'id': '3', 'name': 'volume 3',
+                'source_volid': '3',
+                'consistencygroup_id': '2'}
+        src_vol1 = {'id': '1', 'name': 'source vol 1',
+                    'consistencygroup_id': '1'}
+        src_vol2 = {'id': '2', 'name': 'source vol 2',
+                    'consistencygroup_id': '1'}
+        src_vol3 = {'id': '3', 'name': 'source vol 3',
+                    'consistencygroup_id': '1'}
+        volumes = []
+        src_vols = []
+        volumes.append(vol1)
+        volumes.append(vol2)
+        volumes.append(vol3)
+        src_vols.append(src_vol2)
+        src_vols.append(src_vol3)
+        src_vols.append(src_vol1)
+        i = 0
+        for vol in volumes:
+            src_vol = src_vols[i]
+            i += 1
+            self.assertNotEqual(vol['source_volid'], src_vol['id'])
+        sorted_src_vols = self.volume._sort_source_vols(volumes, src_vols)
+        i = 0
+        for vol in volumes:
+            src_vol = sorted_src_vols[i]
+            i += 1
+            self.assertEqual(vol['source_volid'], src_vol['id'])
+
+        src_vols[2]['id'] = '9999'
+        self.assertRaises(exception.VolumeNotFound,
+                          self.volume._sort_source_vols,
+                          volumes, src_vols)
+
+        self.assertRaises(exception.InvalidInput,
+                          self.volume._sort_source_vols,
                           volumes, [])
 
     @staticmethod
@@ -5607,7 +5690,8 @@ class GenericVolumeDriverTestCase(DriverTestCase):
                                  mock_file_open,
                                  mock_temporary_chown):
         vol = tests_utils.create_volume(self.context)
-        vol['status'] = 'in-use'
+        vol['previous_status'] = 'in-use'
+        temp_vol = tests_utils.create_volume(self.context)
         self.context.user_id = 'fake'
         self.context.project_id = 'fake'
         backup = tests_utils.create_backup(self.context,
@@ -5620,11 +5704,11 @@ class GenericVolumeDriverTestCase(DriverTestCase):
         self.volume.driver._attach_volume = mock.MagicMock()
         self.volume.driver._detach_volume = mock.MagicMock()
         self.volume.driver.terminate_connection = mock.MagicMock()
-        self.volume.driver.create_snapshot = mock.MagicMock()
-        self.volume.driver.delete_snapshot = mock.MagicMock()
-        self.volume.driver.create_volume_from_snapshot = mock.MagicMock()
+        self.volume.driver._create_temp_cloned_volume = mock.MagicMock()
+        self.volume.driver._delete_volume = mock.MagicMock()
 
         mock_volume_get.return_value = vol
+        self.volume.driver._create_temp_cloned_volume.return_value = temp_vol
         mock_get_connector_properties.return_value = properties
         f = mock_file_open.return_value = file('/dev/null')
 
@@ -5635,6 +5719,10 @@ class GenericVolumeDriverTestCase(DriverTestCase):
                                          backup_service)
 
         mock_volume_get.assert_called_with(self.context, vol['id'])
+        self.volume.driver._create_temp_cloned_volume.assert_called_once_with(
+            self.context, vol)
+        self.volume.driver._delete_volume.assert_called_once_with(self.context,
+                                                                  temp_vol)
 
     def test_restore_backup(self):
         vol = tests_utils.create_volume(self.context)
@@ -6141,10 +6229,14 @@ class LVMVolumeDriverTestCase(DriverTestCase):
                                  mock_get_connector_properties,
                                  mock_file_open,
                                  mock_temporary_chown):
+
         vol = tests_utils.create_volume(self.context)
-        vol['status'] = 'in-use'
+        vol['previous_status'] = 'in-use'
         self.context.user_id = 'fake'
         self.context.project_id = 'fake'
+
+        mock_volume_get.return_value = vol
+        temp_snapshot = tests_utils.create_snapshot(self.context, vol['id'])
         backup = tests_utils.create_backup(self.context,
                                            vol['id'])
         backup_obj = objects.Backup.get_by_id(self.context, backup.id)
@@ -6155,20 +6247,24 @@ class LVMVolumeDriverTestCase(DriverTestCase):
         self.volume.driver._detach_volume = mock.MagicMock()
         self.volume.driver._attach_volume = mock.MagicMock()
         self.volume.driver.terminate_connection = mock.MagicMock()
-        self.volume.driver.create_snapshot = mock.MagicMock()
-        self.volume.driver.delete_snapshot = mock.MagicMock()
+        self.volume.driver._create_temp_snapshot = mock.MagicMock()
+        self.volume.driver._delete_snapshot = mock.MagicMock()
 
-        mock_volume_get.return_value = vol
         mock_get_connector_properties.return_value = properties
         f = mock_file_open.return_value = file('/dev/null')
 
         backup_service.backup(backup_obj, f, None)
         self.volume.driver._attach_volume.return_value = attach_info
+        self.volume.driver._create_temp_snapshot.return_value = temp_snapshot
 
         self.volume.driver.backup_volume(self.context, backup_obj,
                                          backup_service)
 
         mock_volume_get.assert_called_with(self.context, vol['id'])
+        self.volume.driver._create_temp_snapshot.assert_called_once_with(
+            self.context, vol)
+        self.volume.driver._delete_snapshot.assert_called_once_with(
+            self.context, temp_snapshot)
 
     def test_create_volume_from_snapshot_none_sparse(self):
 
