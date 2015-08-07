@@ -644,12 +644,17 @@ class QoSSpecsInUse(CinderException):
 
 
 class KeyManagerError(CinderException):
-    msg_fmt = _("key manager error: %(reason)s")
+    message = _("key manager error: %(reason)s")
 
 
 class ManageExistingInvalidReference(CinderException):
     message = _("Manage existing volume failed due to invalid backend "
                 "reference %(existing_ref)s: %(reason)s")
+
+
+class ManageExistingAlreadyManaged(CinderException):
+    message = _("Unable to manage existing volume. "
+                "Volume %(volume_ref)s already managed.")
 
 
 class ReplicationError(CinderException):
@@ -684,15 +689,15 @@ ObjectFieldInvalid = obj_exc.ObjectFieldInvalid
 
 
 class VolumeGroupNotFound(CinderException):
-    msg_fmt = _('Unable to find Volume Group: %(vg_name)s')
+    message = _('Unable to find Volume Group: %(vg_name)s')
 
 
 class VolumeGroupCreationFailed(CinderException):
-    msg_fmt = _('Failed to create Volume Group: %(vg_name)s')
+    message = _('Failed to create Volume Group: %(vg_name)s')
 
 
 class VolumeDeviceNotFound(CinderException):
-    msg_fmt = _('Volume device not found at %(device)s.')
+    message = _('Volume device not found at %(device)s.')
 
 
 # Driver specific exceptions
