@@ -468,7 +468,12 @@ class VolumeBackupSizeExceedsAvailableQuota(QuotaError):
 
 
 class VolumeLimitExceeded(QuotaError):
-    message = _("Maximum number of volumes allowed (%(allowed)d) exceeded")
+    message = _("Maximum number of volumes allowed (%(allowed)d) exceeded for "
+                "quota '%(name)s'.")
+
+    def __init__(self, message=None, **kwargs):
+        kwargs.setdefault('name', 'volumes')
+        super(VolumeLimitExceeded, self).__init__(message, **kwargs)
 
 
 class SnapshotLimitExceeded(QuotaError):
@@ -939,17 +944,6 @@ class XtremIOAlreadyMappedError(CinderException):
 
 class XtremIOArrayBusy(CinderException):
     message = _("System is busy, retry operation.")
-
-
-# StorPool driver
-class StorPoolConfigurationMissing(CinderException):
-    message = _("Missing parameter %(param)s in the %(section)s section "
-                "of the /etc/storpool.conf file")
-
-
-class StorPoolConfigurationInvalid(CinderException):
-    message = _("Invalid parameter %(param)s in the %(section)s section "
-                "of the /etc/storpool.conf file: %(error)s")
 
 
 # Infortrend EonStor DS Driver

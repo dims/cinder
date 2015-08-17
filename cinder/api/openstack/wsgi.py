@@ -1220,6 +1220,74 @@ class Controller(object):
                 explanation=_("Missing required element '%s' in "
                               "request body.") % entity_name)
 
+    @staticmethod
+    def validate_name_and_description(body):
+        name = body.get('name')
+        if name is not None:
+            if isinstance(name, six.string_types):
+                body['name'] = name.strip()
+            try:
+                utils.check_string_length(body['name'], 'Name',
+                                          min_length=1, max_length=255)
+            except exception.InvalidInput as error:
+                raise webob.exc.HTTPBadRequest(explanation=error.msg)
+
+        description = body.get('description')
+        if description is not None:
+            try:
+                utils.check_string_length(description, 'Description',
+                                          min_length=0, max_length=255)
+            except exception.InvalidInput as error:
+                raise webob.exc.HTTPBadRequest(explanation=error.msg)
+
+    @staticmethod
+    def validate_string_length(value, entity_name, min_length=0,
+                               max_length=None, remove_whitespaces=False):
+        """Check the length of specified string.
+
+        :param value: the value of the string
+        :param entity_name: the name of the string
+        :param min_length: the min_length of the string
+        :param max_length: the max_length of the string
+        :param remove_whitespaces: True if trimming whitespaces is needed
+                                   else False
+        """
+        if isinstance(value, six.string_types) and remove_whitespaces:
+            value = value.strip()
+        try:
+            utils.check_string_length(value, entity_name,
+                                      min_length=min_length,
+                                      max_length=max_length)
+        except exception.InvalidInput as error:
+            raise webob.exc.HTTPBadRequest(explanation=error.msg)
+
+    @staticmethod
+    def validate_integer(value, name, min_value=None, max_value=None):
+        """Make sure that value is a valid integer, potentially within range.
+
+        :param value: the value of the integer
+        :param name: the name of the integer
+        :param min_length: the min_length of the integer
+        :param max_length: the max_length of the integer
+        :returns: integer
+        """
+        try:
+            value = int(value)
+        except (TypeError, ValueError, UnicodeEncodeError):
+            raise webob.exc.HTTPBadRequest(explanation=(
+                _('%s must be an integer.') % name))
+
+        if min_value is not None and value < min_value:
+            raise webob.exc.HTTPBadRequest(
+                explanation=(_('%(value_name)s must be >= %(min_value)d') %
+                             {'value_name': name, 'min_value': min_value}))
+        if max_value is not None and value > max_value:
+            raise webob.exc.HTTPBadRequest(
+                explanation=(_('%(value_name)s must be <= %(max_value)d') %
+                             {'value_name': name, 'max_value': max_value}))
+
+        return value
+
 
 class Fault(webob.exc.HTTPException):
     """Wrap webob.exc.HTTPException to provide API friendly response."""

@@ -382,6 +382,13 @@ class ExtractVolumeRequestTask(flow_utils.CinderTask):
         volume_type_id = self._get_volume_type_id(volume_type,
                                                   source_volume, snapshot)
 
+        if image_id and volume_types.is_encrypted(context, volume_type_id):
+            msg = _('Create encrypted volumes with type %(type)s '
+                    'from image %(image)s is not supported.')
+            msg = msg % {'type': volume_type_id,
+                         'image': image_id, }
+            raise exception.InvalidInput(reason=msg)
+
         encryption_key_id = self._get_encryption_key_id(key_manager,
                                                         context,
                                                         volume_type_id,
@@ -547,6 +554,7 @@ class QuotaReserveTask(flow_utils.CinderTask):
                 return None
 
             over_name = _get_over('gigabytes')
+            exceeded_vol_limit_name = _get_over('volumes')
             if over_name:
                 msg = _LW("Quota exceeded for %(s_pid)s, tried to create "
                           "%(s_size)sG volume (%(d_consumed)dG "
@@ -560,13 +568,18 @@ class QuotaReserveTask(flow_utils.CinderTask):
                     requested=size,
                     consumed=_consumed(over_name),
                     quota=quotas[over_name])
-            elif _get_over('volumes'):
-                msg = _LW("Quota exceeded for %(s_pid)s, tried to create "
-                          "volume (%(d_consumed)d volumes "
-                          "already consumed)")
-                LOG.warning(msg, {'s_pid': context.project_id,
-                                  'd_consumed': _consumed('volumes')})
-                raise exception.VolumeLimitExceeded(allowed=quotas['volumes'])
+            elif exceeded_vol_limit_name:
+                msg = _LW("Quota %(s_name)s exceeded for %(s_pid)s, tried "
+                          "to create volume (%(d_consumed)d volume(s) "
+                          "already consumed).")
+                LOG.warning(msg,
+                            {'s_name': exceeded_vol_limit_name,
+                             's_pid': context.project_id,
+                             'd_consumed':
+                             _consumed(exceeded_vol_limit_name)})
+                raise exception.VolumeLimitExceeded(
+                    allowed=quotas[exceeded_vol_limit_name],
+                    name=exceeded_vol_limit_name)
             else:
                 # If nothing was reraised, ensure we reraise the initial error
                 raise
@@ -671,9 +684,8 @@ class VolumeCastTask(flow_utils.CinderTask):
         cgsnapshot_id = request_spec['cgsnapshot_id']
 
         if cgroup_id:
-            cgroup = self.db.consistencygroup_get(context, cgroup_id)
-            if cgroup:
-                host = cgroup.get('host', None)
+            cgroup = objects.ConsistencyGroup.get_by_id(context, cgroup_id)
+            host = cgroup.host
         elif snapshot_id and CONF.snapshot_same_host:
             # NOTE(Rongze Zhu): A simple solution for bug 1008866.
             #

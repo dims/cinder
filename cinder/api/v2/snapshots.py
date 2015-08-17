@@ -33,16 +33,16 @@ from cinder.volume import utils as volume_utils
 LOG = logging.getLogger(__name__)
 
 
-def _translate_snapshot_detail_view(context, snapshot):
+def _translate_snapshot_detail_view(snapshot):
     """Maps keys for snapshots details view."""
 
-    d = _translate_snapshot_summary_view(context, snapshot)
+    d = _translate_snapshot_summary_view(snapshot)
 
     # NOTE(gagupta): No additional data / lookups at the moment
     return d
 
 
-def _translate_snapshot_summary_view(context, snapshot):
+def _translate_snapshot_summary_view(snapshot):
     """Maps keys for snapshots summary view."""
     d = {}
 
@@ -108,7 +108,7 @@ class SnapshotsController(wsgi.Controller):
         except exception.SnapshotNotFound as error:
             raise exc.HTTPNotFound(explanation=error.msg)
 
-        return {'snapshot': _translate_snapshot_detail_view(context, snapshot)}
+        return {'snapshot': _translate_snapshot_detail_view(snapshot)}
 
     def delete(self, req, id):
         """Delete a snapshot."""
@@ -157,7 +157,7 @@ class SnapshotsController(wsgi.Controller):
                                                       search_opts=search_opts)
         limited_list = common.limited(snapshots.objects, req)
         req.cache_db_snapshots(limited_list)
-        res = [entity_maker(context, snapshot) for snapshot in limited_list]
+        res = [entity_maker(snapshot) for snapshot in limited_list]
         return {'snapshots': res}
 
     @wsgi.response(202)
@@ -185,11 +185,11 @@ class SnapshotsController(wsgi.Controller):
         force = snapshot.get('force', False)
         msg = _LI("Create snapshot from volume %s")
         LOG.info(msg, volume_id, context=context)
+        self.validate_name_and_description(snapshot)
 
         # NOTE(thingee): v2 API allows name instead of display_name
         if 'name' in snapshot:
-            snapshot['display_name'] = snapshot.get('name')
-            del snapshot['name']
+            snapshot['display_name'] = snapshot.pop('name')
 
         try:
             force = strutils.bool_from_string(force, strict=True)
@@ -213,7 +213,7 @@ class SnapshotsController(wsgi.Controller):
                 **kwargs)
         req.cache_db_snapshot(new_snapshot)
 
-        retval = _translate_snapshot_detail_view(context, new_snapshot)
+        retval = _translate_snapshot_detail_view(new_snapshot)
 
         return {'snapshot': retval}
 
@@ -240,17 +240,16 @@ class SnapshotsController(wsgi.Controller):
             'display_name',
             'display_description',
         )
+        self.validate_name_and_description(snapshot)
 
         # NOTE(thingee): v2 API allows name instead of display_name
         if 'name' in snapshot:
-            snapshot['display_name'] = snapshot['name']
-            del snapshot['name']
+            snapshot['display_name'] = snapshot.pop('name')
 
         # NOTE(thingee): v2 API allows description instead of
         # display_description
         if 'description' in snapshot:
-            snapshot['display_description'] = snapshot['description']
-            del snapshot['description']
+            snapshot['display_description'] = snapshot.pop('description')
 
         for key in valid_update_keys:
             if key in snapshot:
@@ -269,7 +268,7 @@ class SnapshotsController(wsgi.Controller):
         volume_utils.notify_about_snapshot_usage(context, snapshot,
                                                  'update.end')
 
-        return {'snapshot': _translate_snapshot_detail_view(context, snapshot)}
+        return {'snapshot': _translate_snapshot_detail_view(snapshot)}
 
 
 def create_resource(ext_mgr):

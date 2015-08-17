@@ -39,6 +39,7 @@ def create_volume(ctxt,
                   replication_extended_status=None,
                   replication_driver_data=None,
                   consistencygroup_id=None,
+                  previous_status=None,
                   **kwargs):
     """Create a volume object in the DB."""
     vol = {}
@@ -61,6 +62,7 @@ def create_volume(ctxt,
     vol['replication_status'] = replication_status
     vol['replication_extended_status'] = replication_extended_status
     vol['replication_driver_data'] = replication_driver_data
+    vol['previous_status'] = previous_status
 
     return db.volume_create(ctxt, vol)
 
@@ -112,8 +114,8 @@ def create_consistencygroup(ctxt,
     """Create a consistencygroup object in the DB."""
     cg = {}
     cg['host'] = host
-    cg['user_id'] = ctxt.user_id
-    cg['project_id'] = ctxt.project_id
+    cg['user_id'] = ctxt.user_id or 'fake_user_id'
+    cg['project_id'] = ctxt.project_id or 'fake_project_id'
     cg['status'] = status
     cg['name'] = name
     cg['description'] = description

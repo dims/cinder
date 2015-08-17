@@ -1216,8 +1216,12 @@ def volume_detached(context, volume_id, attachment_id):
     """
     session = get_session()
     with session.begin():
-        attachment = volume_attachment_get(context, attachment_id,
-                                           session=session)
+        attachment = None
+        try:
+            attachment = volume_attachment_get(context, attachment_id,
+                                               session=session)
+        except exception.VolumeAttachmentNotFound:
+            pass
 
         # If this is already detached, attachment will be None
         if attachment:
@@ -1339,7 +1343,7 @@ def volume_get(context, volume_id):
 
 @require_admin_context
 def volume_get_all(context, marker, limit, sort_keys=None, sort_dirs=None,
-                   filters=None):
+                   filters=None, offset=None):
     """Retrieves all volumes.
 
     If no sort parameters are specified then the returned volumes are sorted
@@ -1364,7 +1368,7 @@ def volume_get_all(context, marker, limit, sort_keys=None, sort_dirs=None,
     with session.begin():
         # Generate the query
         query = _generate_paginate_query(context, session, marker, limit,
-                                         sort_keys, sort_dirs, filters)
+                                         sort_keys, sort_dirs, filters, offset)
         # No volumes would match, return empty list
         if query is None:
             return []
@@ -1429,7 +1433,8 @@ def volume_get_all_by_group(context, group_id, filters=None):
 
 @require_context
 def volume_get_all_by_project(context, project_id, marker, limit,
-                              sort_keys=None, sort_dirs=None, filters=None):
+                              sort_keys=None, sort_dirs=None, filters=None,
+                              offset=None):
     """Retrieves all volumes in a project.
 
     If no sort parameters are specified then the returned volumes are sorted
@@ -1459,7 +1464,7 @@ def volume_get_all_by_project(context, project_id, marker, limit,
         filters['project_id'] = project_id
         # Generate the query
         query = _generate_paginate_query(context, session, marker, limit,
-                                         sort_keys, sort_dirs, filters)
+                                         sort_keys, sort_dirs, filters, offset)
         # No volumes would match, return empty list
         if query is None:
             return []
@@ -1467,7 +1472,7 @@ def volume_get_all_by_project(context, project_id, marker, limit,
 
 
 def _generate_paginate_query(context, session, marker, limit, sort_keys,
-                             sort_dirs, filters):
+                             sort_dirs, filters, offset=None):
     """Generate the query to include the filters and the paginate options.
 
     Returns a query with sorting / pagination criteria added or None
@@ -1486,6 +1491,7 @@ def _generate_paginate_query(context, session, marker, limit, sort_keys,
                     or sets cause an 'IN' operation, while exact matching
                     is used for other values, see _process_volume_filters
                     function for more information
+    :param offset: number of items to skip
     :returns: updated query or None
     """
     sort_keys, sort_dirs = process_sort_params(sort_keys,
@@ -1505,7 +1511,8 @@ def _generate_paginate_query(context, session, marker, limit, sort_keys,
     return sqlalchemyutils.paginate_query(query, models.Volume, limit,
                                           sort_keys,
                                           marker=marker_volume,
-                                          sort_dirs=sort_dirs)
+                                          sort_dirs=sort_dirs,
+                                          offset=offset)
 
 
 def _process_volume_filters(query, filters):

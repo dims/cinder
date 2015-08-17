@@ -31,6 +31,7 @@ common_opts = [
                help='Storage Center System Serial Number'),
     cfg.IntOpt('dell_sc_api_port',
                default=3033,
+               min=1, max=65535,
                help='Dell API port'),
     cfg.StrOpt('dell_sc_server_folder',
                default='openstack',
@@ -289,7 +290,7 @@ class DellCommonDriver(driver.ConsistencyGroupVD, driver.ManageableVD,
         raise exception.VolumeBackendAPIException(
             _('Failed to delete snapshot %s') % snapshot_id)
 
-    def create_export(self, context, volume):
+    def create_export(self, context, volume, connector):
         """Create an export of a volume.
 
         The volume exists on creation and will be visible on

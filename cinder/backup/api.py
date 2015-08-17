@@ -99,11 +99,13 @@ class API(base.Base):
         self.backup_rpcapi.delete_backup(context, backup)
 
     def get_all(self, context, search_opts=None):
-        if search_opts is None:
-            search_opts = {}
         check_policy(context, 'get_all')
 
-        if context.is_admin:
+        search_opts = search_opts or {}
+
+        if (context.is_admin and 'all_tenants' in search_opts):
+            # Need to remove all_tenants to pass the filtering below.
+            search_opts.pop('all_tenants', None)
             backups = objects.BackupList.get_all(context, filters=search_opts)
         else:
             backups = objects.BackupList.get_all_by_project(
@@ -316,7 +318,8 @@ class API(base.Base):
                                           volume_id)
 
         d = {'backup_id': backup_id,
-             'volume_id': volume_id, }
+             'volume_id': volume_id,
+             'volume_name': volume['display_name'], }
 
         return d
 

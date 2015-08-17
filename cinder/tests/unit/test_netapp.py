@@ -643,13 +643,13 @@ class NetAppDirectCmodeISCSIDriverTestCase(test.TestCase):
                          'get_operational_network_interface_addresses',
                          mock.Mock(return_value=[]))
         self.driver.create_volume(self.volume)
-        updates = self.driver.create_export(None, self.volume)
+        updates = self.driver.create_export(None, self.volume, {})
         self.assertTrue(updates['provider_location'])
         self.volume['provider_location'] = updates['provider_location']
 
         connection_info = self.driver.initialize_connection(self.volume,
                                                             self.connector)
-        self.assertEqual(connection_info['driver_volume_type'], 'iscsi')
+        self.assertEqual('iscsi', connection_info['driver_volume_type'])
         properties = connection_info['data']
         if not properties:
             raise AssertionError('Target portal is none')
@@ -667,13 +667,13 @@ class NetAppDirectCmodeISCSIDriverTestCase(test.TestCase):
                          'get_operational_network_interface_addresses',
                          mock.Mock(return_value=[]))
         self.driver.create_volume(self.volume)
-        updates = self.driver.create_export(None, self.volume)
+        updates = self.driver.create_export(None, self.volume, {})
         self.assertTrue(updates['provider_location'])
         self.volume['provider_location'] = updates['provider_location']
         connector_new = {'initiator': 'iqn.1993-08.org.debian:01:1001'}
         connection_info = self.driver.initialize_connection(self.volume,
                                                             connector_new)
-        self.assertEqual(connection_info['driver_volume_type'], 'iscsi')
+        self.assertEqual('iscsi', connection_info['driver_volume_type'])
         properties = connection_info['data']
         if not properties:
             raise AssertionError('Target portal is none')
@@ -681,7 +681,7 @@ class NetAppDirectCmodeISCSIDriverTestCase(test.TestCase):
     def test_vol_stats(self):
         self.mock_object(client_base.Client, 'provide_ems')
         stats = self.driver.get_volume_stats(refresh=True)
-        self.assertEqual(stats['vendor_name'], 'NetApp')
+        self.assertEqual('NetApp', stats['vendor_name'])
 
     def test_create_vol_snapshot_diff_size_resize(self):
         self.driver.create_volume(self.volume)

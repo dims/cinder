@@ -158,16 +158,19 @@ class HDSNFSDriverTest(test.TestCase):
         self.backend = SimulatedHnasBackend()
         m_factory_bend.return_value = self.backend
 
-        (handle, self.config_file) = tempfile.mkstemp('.xml')
-        os.write(handle, HNASCONF)
-        os.close(handle)
-        (handle, self.shares_file) = tempfile.mkstemp('')
-        os.write(handle, SHARESCONF)
-        os.close(handle)
+        self.config_file = tempfile.NamedTemporaryFile("w+", suffix='.xml')
+        self.addCleanup(self.config_file.close)
+        self.config_file.write(HNASCONF)
+        self.config_file.flush()
+
+        self.shares_file = tempfile.NamedTemporaryFile("w+", suffix='.xml')
+        self.addCleanup(self.shares_file.close)
+        self.shares_file.write(SHARESCONF)
+        self.shares_file.flush()
 
         self.configuration = mock.Mock(spec=conf.Configuration)
-        self.configuration.hds_hnas_nfs_config_file = self.config_file
-        self.configuration.nfs_shares_config = self.shares_file
+        self.configuration.hds_hnas_nfs_config_file = self.config_file.name
+        self.configuration.nfs_shares_config = self.shares_file.name
         self.configuration.nfs_mount_point_base = '/opt/stack/cinder/mnt'
         self.configuration.nfs_mount_options = None
         self.configuration.nas_ip = None
@@ -176,13 +179,8 @@ class HDSNFSDriverTest(test.TestCase):
 
         self.driver = nfs.HDSNFSDriver(configuration=self.configuration)
         self.driver.do_setup("")
-        self.addCleanup(self._clean)
 
-    def _clean(self):
-        os.remove(self.config_file)
-        os.remove(self.shares_file)
-
-    @mock.patch('__builtin__.open')
+    @mock.patch('six.moves.builtins.open')
     @mock.patch.object(os, 'access')
     def test_read_config(self, m_access, m_open):
         # Test exception when file is not found
@@ -217,7 +215,7 @@ class HDSNFSDriverTest(test.TestCase):
 
         loc = self.driver.create_snapshot(svol)
         out = "{'provider_location': \'" + _SHARE + "'}"
-        self.assertEqual(str(loc), out)
+        self.assertEqual(out, str(loc))
 
     @mock.patch.object(nfs.HDSNFSDriver, '_get_service')
     @mock.patch.object(nfs.HDSNFSDriver, '_id_to_vol', side_effect=id_to_vol)
@@ -236,7 +234,7 @@ class HDSNFSDriverTest(test.TestCase):
         loc = self.driver.create_cloned_volume(vol, svol)
 
         out = "{'provider_location': \'" + _SHARE + "'}"
-        self.assertEqual(str(loc), out)
+        self.assertEqual(out, str(loc))
 
     @mock.patch.object(nfs.HDSNFSDriver, '_ensure_shares_mounted')
     @mock.patch.object(nfs.HDSNFSDriver, '_do_create_volume')
@@ -270,7 +268,7 @@ class HDSNFSDriverTest(test.TestCase):
         m_volume_not_present.return_value = True
 
         self.driver.delete_snapshot(svol)
-        self.assertEqual(svol['provider_location'], None)
+        self.assertEqual(None, svol['provider_location'])
 
     @mock.patch.object(nfs.HDSNFSDriver, '_get_service')
     @mock.patch.object(nfs.HDSNFSDriver, '_id_to_vol', side_effect=id_to_vol)
@@ -291,11 +289,11 @@ class HDSNFSDriverTest(test.TestCase):
 
         loc = self.driver.create_volume_from_snapshot(vol, svol)
         out = "{'provider_location': \'" + _SHARE + "'}"
-        self.assertEqual(str(loc), out)
+        self.assertEqual(out, str(loc))
 
     @mock.patch.object(volume_types, 'get_volume_type_extra_specs',
                        return_value={'key': 'type', 'service_label': 'silver'})
     def test_get_pool(self, m_ext_spec):
         vol = _VOLUME.copy()
 
-        self.assertEqual(self.driver.get_pool(vol), 'silver')
+        self.assertEqual('silver', self.driver.get_pool(vol))

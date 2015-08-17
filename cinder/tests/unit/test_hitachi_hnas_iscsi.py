@@ -82,7 +82,8 @@ HNAS_WRONG_CONF2 = """<?xml version="1.0" encoding="UTF-8" ?>
 # The following information is passed on to tests, when creating a volume
 _VOLUME = {'name': 'testvol', 'volume_id': '1234567890', 'size': 128,
            'volume_type': 'silver', 'volume_type_id': '1',
-           'provider_location': None, 'id': 'abcdefg',
+           'provider_location': '83-68-96-AA-DA-5D.volume-2dfe280e-470a-4182'
+                                '-afb8-1755025c35b8', 'id': 'abcdefg',
            'host': 'host1@hnas-iscsi-backend#silver'}
 
 
@@ -257,6 +258,16 @@ class SimulatedHnasBackend(object):
         self.out = """wGkJhTpXaaYJ5Rv"""
         return self.out
 
+    def get_evs(self, cmd, ip0, user, pw, fsid):
+        return '1'
+
+    def check_lu(self, cmd, ip0, user, pw, volume_name, hdp):
+        return True, 1, {'alias': 'cinder-default', 'secret': 'mysecret',
+                         'iqn': 'iqn.1993-08.org.debian:01:11f90746eb2'}
+
+    def check_target(self, cmd, ip0, user, pw, hdp, target_alias):
+        return False, None
+
 
 class HNASiSCSIDriverTest(test.TestCase):
     """Test HNAS iSCSI volume driver."""
@@ -270,19 +281,16 @@ class HNASiSCSIDriverTest(test.TestCase):
         self.backend = SimulatedHnasBackend()
         _factory_bend.return_value = self.backend
 
-        (handle, self.config_file) = tempfile.mkstemp('.xml')
-        os.write(handle, HNASCONF)
-        os.close(handle)
+        self.config_file = tempfile.NamedTemporaryFile("w+", suffix='.xml')
+        self.addCleanup(self.config_file.close)
+        self.config_file.write(HNASCONF)
+        self.config_file.flush()
 
         self.configuration = mock.Mock(spec=conf.Configuration)
-        self.configuration.hds_hnas_iscsi_config_file = self.config_file
+        self.configuration.hds_hnas_iscsi_config_file = self.config_file.name
         self.configuration.hds_svc_iscsi_chap_enabled = True
         self.driver = iscsi.HDSISCSIDriver(configuration=self.configuration)
         self.driver.do_setup("")
-        self.addCleanup(self._clean)
-
-    def _clean(self):
-        os.remove(self.config_file)
 
     def _create_volume(self):
         loc = self.driver.create_volume(_VOLUME)
@@ -290,7 +298,7 @@ class HNASiSCSIDriverTest(test.TestCase):
         vol['provider_location'] = loc['provider_location']
         return vol
 
-    @mock.patch('__builtin__.open')
+    @mock.patch('six.moves.builtins.open')
     @mock.patch.object(os, 'access')
     def test_read_config(self, m_access, m_open):
         # Test exception when file is not found
@@ -319,9 +327,9 @@ class HNASiSCSIDriverTest(test.TestCase):
 
     def test_get_volume_stats(self):
         stats = self.driver.get_volume_stats(True)
-        self.assertEqual(stats["vendor_name"], "HDS")
-        self.assertEqual(stats["storage_protocol"], "iSCSI")
-        self.assertEqual(len(stats['pools']), 2)
+        self.assertEqual("HDS", stats["vendor_name"])
+        self.assertEqual("iSCSI", stats["storage_protocol"])
+        self.assertEqual(2, len(stats['pools']))
 
     def test_delete_volume(self):
         vol = self._create_volume()
@@ -426,3 +434,31 @@ class HNASiSCSIDriverTest(test.TestCase):
     def test_get_pool(self, m_ext_spec):
         label = self.driver.get_pool(_VOLUME)
         self.assertEqual('silver', label)
+
+    @mock.patch.object(time, 'sleep')
+    @mock.patch.object(iscsi.HDSISCSIDriver, '_update_vol_location')
+    def test_get_service_target(self, m_update_vol_location, m_sleep):
+
+        vol = _VOLUME.copy()
+        self.backend.check_lu = mock.MagicMock()
+        self.backend.check_target = mock.MagicMock()
+
+        # Test the case where volume is not already mapped - CHAP enabled
+        self.backend.check_lu.return_value = (False, 0, None)
+        self.backend.check_target.return_value = (False, None)
+        ret = self.driver._get_service_target(vol)
+        iscsi_ip, iscsi_port, ctl, svc_port, hdp, alias, secret = ret
+        self.assertEqual('evs1-tgt0', alias)
+
+        # Test the case where volume is not already mapped - CHAP disabled
+        self.driver.config['chap_enabled'] = 'False'
+        ret = self.driver._get_service_target(vol)
+        iscsi_ip, iscsi_port, ctl, svc_port, hdp, alias, secret = ret
+        self.assertEqual('evs1-tgt0', alias)
+
+        # Test the case where all targets are full
+        fake_tgt = {'alias': 'fake', 'luns': range(0, 32)}
+        self.backend.check_lu.return_value = (False, 0, None)
+        self.backend.check_target.return_value = (True, fake_tgt)
+        self.assertRaises(exception.NoMoreTargets,
+                          self.driver._get_service_target, vol)

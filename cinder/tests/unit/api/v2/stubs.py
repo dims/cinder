@@ -125,7 +125,12 @@ def stub_volume_delete(self, context, *args, **param):
 
 
 def stub_volume_get(self, context, volume_id, viewable_admin_meta=False):
-    return stub_volume(volume_id)
+    if viewable_admin_meta:
+        return stub_volume(volume_id)
+    else:
+        volume = stub_volume(volume_id)
+        del volume['volume_admin_metadata']
+        return volume
 
 
 def stub_volume_get_notfound(self, context,
@@ -134,12 +139,17 @@ def stub_volume_get_notfound(self, context,
 
 
 def stub_volume_get_db(context, volume_id):
-    return stub_volume(volume_id)
+    if context.is_admin:
+        return stub_volume(volume_id)
+    else:
+        volume = stub_volume(volume_id)
+        del volume['volume_admin_metadata']
+        return volume
 
 
 def stub_volume_get_all(context, search_opts=None, marker=None, limit=None,
                         sort_keys=None, sort_dirs=None, filters=None,
-                        viewable_admin_meta=False):
+                        viewable_admin_meta=False, offset=None):
     return [stub_volume(100, project_id='fake'),
             stub_volume(101, project_id='superfake'),
             stub_volume(102, project_id='superduperfake')]
@@ -148,9 +158,9 @@ def stub_volume_get_all(context, search_opts=None, marker=None, limit=None,
 def stub_volume_get_all_by_project(self, context, marker, limit,
                                    sort_keys=None, sort_dirs=None,
                                    filters=None,
-                                   viewable_admin_meta=False):
+                                   viewable_admin_meta=False, offset=None):
     filters = filters or {}
-    return [stub_volume_get(self, context, '1')]
+    return [stub_volume_get(self, context, '1', viewable_admin_meta=True)]
 
 
 def stub_snapshot(id, **kwargs):

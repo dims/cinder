@@ -52,6 +52,7 @@ def make_backup(elem):
 def make_backup_restore(elem):
     elem.set('backup_id')
     elem.set('volume_id')
+    elem.set('volume_name')
 
 
 def make_backup_export_import_record(elem):
@@ -252,6 +253,7 @@ class BackupsController(wsgi.Controller):
             msg = _("Incorrect request body format")
             raise exc.HTTPBadRequest(explanation=msg)
         container = backup.get('container', None)
+        self.validate_name_and_description(backup)
         name = backup.get('name', None)
         description = backup.get('description', None)
         incremental = backup.get('incremental', False)

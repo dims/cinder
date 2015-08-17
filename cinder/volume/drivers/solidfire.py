@@ -1,5 +1,5 @@
-# Copyright 2013 SolidFire Inc
 # All Rights Reserved.
+# Copyright 2013 SolidFire Inc
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -19,6 +19,7 @@ import random
 import socket
 import string
 import time
+import warnings
 
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -26,6 +27,7 @@ from oslo_utils import importutils
 from oslo_utils import timeutils
 from oslo_utils import units
 import requests
+from requests.packages.urllib3 import exceptions
 import six
 
 from cinder import context
@@ -68,6 +70,7 @@ sf_opts = [
 
     cfg.IntOpt('sf_api_port',
                default=443,
+               min=1, max=65535,
                help='SolidFire API port. Useful if the device api is behind '
                     'a proxy on a different port.')]
 
@@ -188,14 +191,14 @@ class SolidFireDriver(san.SanISCSIDriver):
     def _build_endpoint_info(self, **kwargs):
         endpoint = {}
 
-        endpoint['mvip'] =\
-            kwargs.get('mvip', self.configuration.san_ip)
-        endpoint['login'] =\
-            kwargs.get('login', self.configuration.san_login)
-        endpoint['passwd'] =\
-            kwargs.get('passwd', self.configuration.san_password)
-        endpoint['port'] =\
-            kwargs.get('port', self.configuration.sf_api_port)
+        endpoint['mvip'] = (
+            kwargs.get('mvip', self.configuration.san_ip))
+        endpoint['login'] = (
+            kwargs.get('login', self.configuration.san_login))
+        endpoint['passwd'] = (
+            kwargs.get('passwd', self.configuration.san_password))
+        endpoint['port'] = (
+            kwargs.get('port', self.configuration.sf_api_port))
         endpoint['url'] = 'https://%s:%s' % (endpoint['mvip'],
                                              endpoint['port'])
 
@@ -212,11 +215,13 @@ class SolidFireDriver(san.SanISCSIDriver):
         payload = {'method': method, 'params': params}
 
         url = '%s/json-rpc/%s/' % (endpoint['url'], version)
-        req = requests.post(url,
-                            data=json.dumps(payload),
-                            auth=(endpoint['login'], endpoint['passwd']),
-                            verify=False,
-                            timeout=30)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", exceptions.InsecureRequestWarning)
+            req = requests.post(url,
+                                data=json.dumps(payload),
+                                auth=(endpoint['login'], endpoint['passwd']),
+                                verify=False,
+                                timeout=30)
 
         response = req.json()
         req.close()
@@ -354,7 +359,7 @@ class SolidFireDriver(san.SanISCSIDriver):
     def _do_clone_volume(self, src_uuid,
                          src_project_id,
                          vref):
-        """Create a clone of an existing volume or snapshot. """
+        """Create a clone of an existing volume or snapshot."""
         attributes = {}
         qos = {}
 
@@ -557,18 +562,18 @@ class SolidFireDriver(san.SanISCSIDriver):
         # the optional properties.virtual_size is set on the image
         # before we get here
         virt_size = int(image_meta['properties'].get('virtual_size'))
-        min_sz_in_bytes =\
-            math.ceil(virt_size / float(units.Gi)) * float(units.Gi)
+        min_sz_in_bytes = (
+            math.ceil(virt_size / float(units.Gi)) * float(units.Gi))
         min_sz_in_gig = math.ceil(min_sz_in_bytes / float(units.Gi))
 
         attributes = {}
         attributes['image_info'] = {}
-        attributes['image_info']['image_updated_at'] =\
-            image_meta['updated_at'].isoformat()
-        attributes['image_info']['image_name'] =\
-            image_meta['name']
-        attributes['image_info']['image_created_at'] =\
-            image_meta['created_at'].isoformat()
+        attributes['image_info']['image_updated_at'] = (
+            image_meta['updated_at'].isoformat())
+        attributes['image_info']['image_name'] = (
+            image_meta['name'])
+        attributes['image_info']['image_created_at'] = (
+            image_meta['created_at'].isoformat())
         attributes['image_info']['image_id'] = image_meta['id']
         params = {'name': 'OpenStackIMG-%s' % image_id,
                   'accountID': self.template_account_id,
@@ -631,8 +636,8 @@ class SolidFireDriver(san.SanISCSIDriver):
             return
 
         # Check updated_at field, delete copy and update if needed
-        if sf_vol['attributes']['image_info']['image_updated_at'] ==\
-                image_meta['updated_at'].isoformat():
+        if sf_vol['attributes']['image_info']['image_updated_at'] == (
+                image_meta['updated_at'].isoformat()):
             return
         else:
             # Bummer, it's been updated, delete it
@@ -973,8 +978,8 @@ class SolidFireDriver(san.SanISCSIDriver):
             LOG.error(_LE('Failed to get updated stats'))
 
         results = results['result']['clusterCapacity']
-        free_capacity =\
-            results['maxProvisionedSpace'] - results['usedSpace']
+        free_capacity = (
+            results['maxProvisionedSpace'] - results['usedSpace'])
 
         data = {}
         backend_name = self.configuration.safe_get('volume_backend_name')
@@ -983,18 +988,18 @@ class SolidFireDriver(san.SanISCSIDriver):
         data["driver_version"] = self.VERSION
         data["storage_protocol"] = 'iSCSI'
 
-        data['total_capacity_gb'] =\
-            float(results['maxProvisionedSpace'] / units.Gi)
+        data['total_capacity_gb'] = (
+            float(results['maxProvisionedSpace'] / units.Gi))
 
         data['free_capacity_gb'] = float(free_capacity / units.Gi)
         data['reserved_percentage'] = self.configuration.reserved_percentage
         data['QoS_support'] = True
-        data['compression_percent'] =\
-            results['compressionPercent']
-        data['deduplicaton_percent'] =\
-            results['deDuplicationPercent']
-        data['thin_provision_percent'] =\
-            results['thinProvisioningPercent']
+        data['compression_percent'] = (
+            results['compressionPercent'])
+        data['deduplicaton_percent'] = (
+            results['deDuplicationPercent'])
+        data['thin_provision_percent'] = (
+            results['thinProvisioningPercent'])
         self.cluster_stats = data
 
     def attach_volume(self, context, volume,
@@ -1229,7 +1234,7 @@ class SolidFireDriver(san.SanISCSIDriver):
     def ensure_export(self, context, volume):
         return self.target_driver.ensure_export(context, volume, None)
 
-    def create_export(self, context, volume):
+    def create_export(self, context, volume, connector):
         return self.target_driver.create_export(
             context,
             volume,

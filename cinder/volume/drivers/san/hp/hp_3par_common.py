@@ -71,8 +71,10 @@ from taskflow.patterns import linear_flow
 LOG = logging.getLogger(__name__)
 
 MIN_CLIENT_VERSION = '3.1.2'
+GETCPGSTATDATA_VERSION = '3.2.2'
 DEDUP_API_VERSION = 30201120
 FLASH_CACHE_API_VERSION = 30201200
+SRSTATLD_API_VERSION = 30201200
 
 hp3par_opts = [
     cfg.StrOpt('hp3par_api_url',
@@ -115,6 +117,19 @@ hp3par_opts = [
 
 CONF = cfg.CONF
 CONF.register_opts(hp3par_opts)
+
+# Input/output (total read/write) operations per second.
+THROUGHPUT = 'throughput'
+# Data processed (total read/write) per unit time: kilobytes per second.
+BANDWIDTH = 'bandwidth'
+# Response time (total read/write): microseconds.
+LATENCY = 'latency'
+# IO size (total read/write): kilobytes.
+IO_SIZE = 'io_size'
+# Queue length for processing IO requests
+QUEUE_LENGTH = 'queue_length'
+# Average busy percentage
+AVG_BUSY_PERC = 'avg_busy_perc'
 
 
 class HP3PARCommon(object):
@@ -180,10 +195,13 @@ class HP3PARCommon(object):
         2.0.45 - Python 3 fixes
         2.0.46 - Improved VLUN creation and deletion logic. #1469816
         2.0.47 - Changed initialize_connection to use getHostVLUNs. #1475064
+        2.0.48 - Adding changes to support 3PAR iSCSI multipath.
+        2.0.49 - Added client CPG stats to driver volume stats. bug #1482741
+        2.0.50 - Add over subscription support
 
     """
 
-    VERSION = "2.0.47"
+    VERSION = "2.0.50"
 
     stats = {}
 
@@ -239,13 +257,21 @@ class HP3PARCommon(object):
         cl = client.HP3ParClient(self.config.hp3par_api_url)
         client_version = hp3parclient.version
 
-        if (client_version < MIN_CLIENT_VERSION):
+        if client_version < MIN_CLIENT_VERSION:
             ex_msg = (_('Invalid hp3parclient version found (%(found)s). '
                         'Version %(minimum)s or greater required.')
                       % {'found': client_version,
                          'minimum': MIN_CLIENT_VERSION})
             LOG.error(ex_msg)
             raise exception.InvalidInput(reason=ex_msg)
+        if client_version < GETCPGSTATDATA_VERSION:
+            # getCPGStatData is only found in client version 3.2.2 or later
+            LOG.warning(_LW("getCPGStatData requires "
+                            "hp3parclient version "
+                            "'%(getcpgstatdata_version)s' "
+                            "version '%(version)s' is installed.") %
+                        {'getcpgstatdata_version': GETCPGSTATDATA_VERSION,
+                         'version': client_version})
 
         return cl
 
@@ -297,6 +323,13 @@ class HP3PARCommon(object):
                       "rest_ver": hp3parclient.get_version_string()})
         if self.config.hp3par_debug:
             self.client.debug_rest(True)
+        if self.API_VERSION < SRSTATLD_API_VERSION:
+            # Firmware version not compatible with srstatld
+            LOG.warning(_LW("srstatld requires "
+                            "WSAPI version '%(srstatld_version)s' "
+                            "version '%(version)s' is installed.") %
+                        {'srstatld_version': SRSTATLD_API_VERSION,
+                         'version': self.API_VERSION})
 
     def check_for_setup_error(self):
         self.client_login()
@@ -702,6 +735,22 @@ class HP3PARCommon(object):
         for cpg_name in self.config.hp3par_cpg:
             try:
                 cpg = self.client.getCPG(cpg_name)
+                if (self.API_VERSION >= SRSTATLD_API_VERSION
+                        and hp3parclient.version >= GETCPGSTATDATA_VERSION):
+                    interval = 'daily'
+                    history = '7d'
+                    stat_capabilities = self.client.getCPGStatData(cpg_name,
+                                                                   interval,
+                                                                   history)
+                else:
+                    stat_capabilities = {
+                        THROUGHPUT: None,
+                        BANDWIDTH: None,
+                        LATENCY: None,
+                        IO_SIZE: None,
+                        QUEUE_LENGTH: None,
+                        AVG_BUSY_PERC: None
+                    }
                 if 'numTDVVs' in cpg:
                     total_volumes = int(
                         cpg['numFPVVs'] + cpg['numTPVVs'] + cpg['numTDVVs']
@@ -730,6 +779,10 @@ class HP3PARCommon(object):
                 capacity_utilization = (
                     (float(total_capacity - free_capacity) /
                      float(total_capacity)) * 100)
+                provisioned_capacity = int((cpg['UsrUsage']['totalMiB'] +
+                                            cpg['SAUsage']['totalMiB'] +
+                                            cpg['SDUsage']['totalMiB']) *
+                                           const)
 
             except hpexceptions.HTTPNotFound:
                 err = (_("CPG (%s) doesn't exist on array")
@@ -740,13 +793,25 @@ class HP3PARCommon(object):
             pool = {'pool_name': cpg_name,
                     'total_capacity_gb': total_capacity,
                     'free_capacity_gb': free_capacity,
+                    'provisioned_capacity_gb': provisioned_capacity,
                     'QoS_support': True,
-                    'reserved_percentage': 0,
+                    'thin_provisioning_support': True,
+                    'thick_provisioning_support': True,
+                    'max_over_subscription_ratio': (
+                        self.config.safe_get('max_over_subscription_ratio')),
+                    'reserved_percentage': (
+                        self.config.safe_get('reserved_percentage')),
                     'location_info': ('HP3PARDriver:%(sys_id)s:%(dest_cpg)s' %
                                       {'sys_id': info['serialNumber'],
                                        'dest_cpg': cpg_name}),
                     'total_volumes': total_volumes,
                     'capacity_utilization': capacity_utilization,
+                    THROUGHPUT: stat_capabilities[THROUGHPUT],
+                    BANDWIDTH: stat_capabilities[BANDWIDTH],
+                    LATENCY: stat_capabilities[LATENCY],
+                    IO_SIZE: stat_capabilities[IO_SIZE],
+                    QUEUE_LENGTH: stat_capabilities[QUEUE_LENGTH],
+                    AVG_BUSY_PERC: stat_capabilities[AVG_BUSY_PERC],
                     'filter_function': filter_function,
                     'goodness_function': goodness_function,
                     'multiattach': True,
@@ -758,22 +823,24 @@ class HP3PARCommon(object):
                       'storage_protocol': None,
                       'vendor_name': 'Hewlett-Packard',
                       'volume_backend_name': None,
-                      # Use zero capacities here so we always use a pool.
-                      'total_capacity_gb': 0,
-                      'free_capacity_gb': 0,
-                      'reserved_percentage': 0,
                       'pools': pools}
 
-    def _get_vlun(self, volume_name, hostname, lun_id=None):
+    def _get_vlun(self, volume_name, hostname, lun_id=None, nsp=None):
         """find a VLUN on a 3PAR host."""
         vluns = self.client.getHostVLUNs(hostname)
         found_vlun = None
         for vlun in vluns:
             if volume_name in vlun['volumeName']:
-                if lun_id:
+                if lun_id is not None:
                     if vlun['lun'] == lun_id:
-                        found_vlun = vlun
-                        break
+                        if nsp:
+                            port = self.build_portPos(nsp)
+                            if vlun['portPos'] == port:
+                                found_vlun = vlun
+                                break
+                        else:
+                            found_vlun = vlun
+                            break
                 else:
                     found_vlun = vlun
                     break
@@ -790,7 +857,10 @@ class HP3PARCommon(object):
         """
         volume_name = self._get_3par_vol_name(volume['id'])
         vlun_info = self._create_3par_vlun(volume_name, host['name'], nsp)
-        return self._get_vlun(volume_name, host['name'], vlun_info['lun_id'])
+        return self._get_vlun(volume_name,
+                              host['name'],
+                              vlun_info['lun_id'],
+                              nsp)
 
     def delete_vlun(self, volume, hostname):
         volume_name = self._get_3par_vol_name(volume['id'])
@@ -2111,8 +2181,32 @@ class HP3PARCommon(object):
                     break
         except hpexceptions.HTTPNotFound:
             # ignore, no existing VLUNs were found
+            LOG.debug("No existing VLUNs were found for host/volume "
+                      "combination: %(host)s, %(vol)s",
+                      {'host': host['name'],
+                       'vol': vol_name})
             pass
         return existing_vlun
+
+    def find_existing_vluns(self, volume, host):
+        existing_vluns = []
+        try:
+            vol_name = self._get_3par_vol_name(volume['id'])
+            host_vluns = self.client.getHostVLUNs(host['name'])
+
+            # The first existing VLUN found will be returned.
+            for vlun in host_vluns:
+                if vlun['volumeName'] == vol_name:
+                    existing_vluns.append(vlun)
+                    break
+        except hpexceptions.HTTPNotFound:
+            # ignore, no existing VLUNs were found
+            LOG.debug("No existing VLUNs were found for host/volume "
+                      "combination: %(host)s, %(vol)s",
+                      {'host': host['name'],
+                       'vol': vol_name})
+            pass
+        return existing_vluns
 
     class TaskWaiter(object):
         """TaskWaiter waits for task to be not active and returns status."""

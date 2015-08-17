@@ -401,12 +401,16 @@ class API(base.Base):
         LOG.info(_LI("Volume updated successfully."), resource=vref)
 
     def get(self, context, volume_id, viewable_admin_meta=False):
+        rv = self.db.volume_get(context, volume_id)
+
+        volume = dict(rv)
+
         if viewable_admin_meta:
             ctxt = context.elevated()
-        else:
-            ctxt = context
-        rv = self.db.volume_get(ctxt, volume_id)
-        volume = dict(rv)
+            admin_metadata = self.db.volume_admin_metadata_get(ctxt,
+                                                               volume_id)
+            volume['volume_admin_metadata'] = admin_metadata
+
         try:
             check_policy(context, 'get', volume)
         except exception.PolicyNotAuthorized:
@@ -437,7 +441,8 @@ class API(base.Base):
         return b
 
     def get_all(self, context, marker=None, limit=None, sort_keys=None,
-                sort_dirs=None, filters=None, viewable_admin_meta=False):
+                sort_dirs=None, filters=None, viewable_admin_meta=False,
+                offset=None):
         check_policy(context, 'get_all')
 
         if filters is None:
@@ -471,7 +476,8 @@ class API(base.Base):
             volumes = self.db.volume_get_all(context, marker, limit,
                                              sort_keys=sort_keys,
                                              sort_dirs=sort_dirs,
-                                             filters=filters)
+                                             filters=filters,
+                                             offset=offset)
         else:
             if viewable_admin_meta:
                 context = context.elevated()
@@ -480,7 +486,8 @@ class API(base.Base):
                                                         marker, limit,
                                                         sort_keys=sort_keys,
                                                         sort_dirs=sort_dirs,
-                                                        filters=filters)
+                                                        filters=filters,
+                                                        offset=offset)
 
         LOG.info(_LI("Get all volumes completed successfully."))
         return volumes

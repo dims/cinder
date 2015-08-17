@@ -56,6 +56,7 @@ class EMCCLIFCDriver(driver.FibreChannelDriver):
                 Multiple pools support enhancement
                 Manage/unmanage volume revise
                 White list target ports support
+                Snap copy support
     """
 
     def __init__(self, *args, **kwargs):
@@ -109,7 +110,7 @@ class EMCCLIFCDriver(driver.FibreChannelDriver):
         """Driver entry point to get the export info for an existing volume."""
         pass
 
-    def create_export(self, context, volume):
+    def create_export(self, context, volume, connector):
         """Driver entry point to get the export info for a new volume."""
         pass
 
@@ -258,10 +259,15 @@ class EMCCLIFCDriver(driver.FibreChannelDriver):
         return self.cli.unmanage(volume)
 
     def create_consistencygroup_from_src(self, context, group, volumes,
-                                         cgsnapshot=None, snapshots=None):
+                                         cgsnapshot=None, snapshots=None,
+                                         source_cg=None, source_vols=None):
         """Creates a consistency group from source."""
         return self.cli.create_consistencygroup_from_src(context,
                                                          group,
                                                          volumes,
                                                          cgsnapshot,
                                                          snapshots)
+
+    def update_migrated_volume(self, context, volume, new_volume):
+        """Returns model update for migrated volume."""
+        return self.cli.update_migrated_volume(context, volume, new_volume)

@@ -50,7 +50,6 @@ class HPLeftHandISCSIDriver(driver.TransferVD,
                             driver.ExtendVD,
                             driver.CloneableVD,
                             driver.SnapshotVD,
-                            driver.RetypeVD,
                             driver.MigrateVD,
                             driver.BaseVD):
     """Executes commands relating to HP/LeftHand SAN ISCSI volumes.
@@ -148,8 +147,8 @@ class HPLeftHandISCSIDriver(driver.TransferVD,
     def create_cloned_volume(self, volume, src_vref):
         return self.proxy.create_cloned_volume(volume, src_vref)
 
-    def create_export(self, context, volume):
-        return self.proxy.create_export(context, volume)
+    def create_export(self, context, volume, connector):
+        return self.proxy.create_export(context, volume, connector)
 
     def ensure_export(self, context, volume):
         return self.proxy.ensure_export(context, volume)

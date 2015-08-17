@@ -58,6 +58,19 @@ CHAP_PASS_KEY = "HPQ-cinder-CHAP-secret"
 FLASH_CACHE_ENABLED = 1
 FLASH_CACHE_DISABLED = 2
 
+# Input/output (total read/write) operations per second.
+THROUGHPUT = 'throughput'
+# Data processed (total read/write) per unit time: kilobytes per second.
+BANDWIDTH = 'bandwidth'
+# Response time (total read/write): microseconds.
+LATENCY = 'latency'
+# IO size (total read/write): kilobytes.
+IO_SIZE = 'io_size'
+# Queue length for processing IO requests
+QUEUE_LENGTH = 'queue_length'
+# Average busy percentage
+AVG_BUSY_PERC = 'avg_busy_perc'
+
 
 class HP3PARBaseDriver(object):
 
@@ -179,7 +192,17 @@ class HP3PARBaseDriver(object):
                  'initiator': 'iqn.1993-08.org.debian:01:222',
                  'wwpns': [wwn[0], wwn[1]],
                  'wwnns': ["223456789012345", "223456789054321"],
-                 'host': FAKE_HOST}
+                 'host': FAKE_HOST,
+                 'multipath': False}
+
+    connector_multipath_enabled = {'ip': '10.0.0.2',
+                                   'initiator': ('iqn.1993-08.org'
+                                                 '.debian:01:222'),
+                                   'wwpns': [wwn[0], wwn[1]],
+                                   'wwnns': ["223456789012345",
+                                             "223456789054321"],
+                                   'host': FAKE_HOST,
+                                   'multipath': True}
 
     volume_type = {'name': 'gold',
                    'deleted': False,
@@ -618,7 +641,7 @@ class HP3PARBaseDriver(object):
                 mock.call.getTask(task_id)
             ]
             mock_client.assert_has_calls(expected)
-            self.assertEqual(status, self.STATUS_DONE)
+            self.assertEqual(self.STATUS_DONE, status)
 
     def test_create_volume(self):
         # setup_mock_client drive with default configuration
@@ -675,7 +698,7 @@ class HP3PARBaseDriver(object):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            self.assertEqual(return_model, None)
+            self.assertEqual(None, return_model)
 
     @mock.patch.object(volume_types, 'get_volume_type')
     def test_unsupported_dedup_volume_type(self, _mock_volume_types):
@@ -831,7 +854,7 @@ class HP3PARBaseDriver(object):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            self.assertEqual(return_model, None)
+            self.assertEqual(None, return_model)
 
     @mock.patch.object(volume_types, 'get_volume_type')
     def test_create_volume_dedup(self, _mock_volume_types):
@@ -875,7 +898,7 @@ class HP3PARBaseDriver(object):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            self.assertEqual(return_model, None)
+            self.assertEqual(None, return_model)
 
     @mock.patch.object(volume_types, 'get_volume_type')
     def test_create_volume_flash_cache(self, _mock_volume_types):
@@ -938,7 +961,7 @@ class HP3PARBaseDriver(object):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            self.assertEqual(return_model, None)
+            self.assertEqual(None, return_model)
 
     @mock.patch.object(volume_types, 'get_volume_type')
     def test_unsupported_flash_cache_volume(self, _mock_volume_types):
@@ -1376,7 +1399,7 @@ class HP3PARBaseDriver(object):
             volume['host'] = volume_host
             volume['source_volid'] = HP3PARBaseDriver.VOLUME_ID
             model_update = self.driver.create_cloned_volume(volume, src_vref)
-            self.assertEqual(model_update, None)
+            self.assertEqual(None, model_update)
 
             expected = [
                 mock.call.getCPG(expected_cpg),
@@ -1898,7 +1921,7 @@ class HP3PARBaseDriver(object):
             model_update = self.driver.create_volume_from_snapshot(
                 volume,
                 self.snapshot)
-            self.assertEqual(model_update, None)
+            self.assertEqual(None, model_update)
 
             comment = (
                 '{"snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",'
@@ -1963,7 +1986,7 @@ class HP3PARBaseDriver(object):
             model_update = self.driver.create_volume_from_snapshot(
                 volume,
                 self.snapshot)
-            self.assertEqual(model_update, None)
+            self.assertEqual(None, model_update)
 
             comment = (
                 '{"snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",'
@@ -2263,7 +2286,7 @@ class HP3PARBaseDriver(object):
             mock_create_client.return_value = mock_client
             common = self.driver._login()
             ports = common.get_ports()['members']
-            self.assertEqual(len(ports), 3)
+            self.assertEqual(3, len(ports))
 
     def test_get_by_qos_spec_with_scoping(self):
         mock_client = self.setup_driver()
@@ -2284,9 +2307,9 @@ class HP3PARBaseDriver(object):
                                               type_ref['id'])
             type_ref = volume_types.get_volume_type(self.ctxt, type_ref['id'])
             qos = common._get_qos_by_volume_type(type_ref)
-            self.assertEqual(qos, {'maxIOPS': '1000', 'maxBWS': '50',
-                                   'minIOPS': '100', 'minBWS': '25',
-                                   'latency': '25', 'priority': 'low'})
+            self.assertEqual({'maxIOPS': '1000', 'maxBWS': '50',
+                              'minIOPS': '100', 'minBWS': '25',
+                              'latency': '25', 'priority': 'low'}, qos)
 
     def test_get_by_qos_spec(self):
         mock_client = self.setup_driver()
@@ -2310,9 +2333,9 @@ class HP3PARBaseDriver(object):
                                               type_ref['id'])
             type_ref = volume_types.get_volume_type(self.ctxt, type_ref['id'])
             qos = common._get_qos_by_volume_type(type_ref)
-            self.assertEqual(qos, {'maxIOPS': '1000', 'maxBWS': '50',
-                                   'minIOPS': '100', 'minBWS': '25',
-                                   'latency': '25', 'priority': 'low'})
+            self.assertEqual({'maxIOPS': '1000', 'maxBWS': '50',
+                              'minIOPS': '100', 'minBWS': '25',
+                              'latency': '25', 'priority': 'low'}, qos)
 
     def test_get_by_qos_by_type_only(self):
         mock_client = self.setup_driver()
@@ -2329,9 +2352,9 @@ class HP3PARBaseDriver(object):
                                                      "qos:priority": "high"})
             type_ref = volume_types.get_volume_type(self.ctxt, type_ref['id'])
             qos = common._get_qos_by_volume_type(type_ref)
-            self.assertEqual(qos, {'maxIOPS': '100', 'maxBWS': '50',
-                                   'minIOPS': '10', 'minBWS': '20',
-                                   'latency': '5', 'priority': 'high'})
+            self.assertEqual({'maxIOPS': '100', 'maxBWS': '50',
+                              'minIOPS': '10', 'minBWS': '20',
+                              'latency': '5', 'priority': 'high'}, qos)
 
     def test_create_vlun(self):
         host = 'fake-host'
@@ -3076,7 +3099,8 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
             hpexceptions.HTTPNotFound('fake'),
             [{'active': True,
               'volumeName': self.VOLUME_3PAR_NAME,
-              'lun': 90, 'type': 0}]]
+              'lun': 90, 'type': 0,
+              'portPos': {'cardPort': 1, 'node': 7, 'slot': 1}, }]]
 
         location = ("%(volume_name)s,%(lun_id)s,%(host)s,%(nsp)s" %
                     {'volume_name': self.VOLUME_3PAR_NAME,
@@ -3396,7 +3420,214 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
                 self.standard_logout)
             self.assertNotIn('initiator_target_map', conn_info['data'])
 
-    def test_get_volume_stats(self):
+    @mock.patch('hp3parclient.version', "3.2.2")
+    def test_get_volume_stats1(self):
+        # setup_mock_client drive with the configuration
+        # and return the mock HTTP 3PAR client
+        config = self.setup_configuration()
+        config.filter_function = FILTER_FUNCTION
+        config.goodness_function = GOODNESS_FUNCTION
+        mock_client = self.setup_driver(config=config)
+        mock_client.getCPG.return_value = self.cpgs[0]
+        mock_client.getStorageSystemInfo.return_value = {
+            'serialNumber': '1234'
+        }
+
+        # cpg has no limit
+        mock_client.getCPGAvailableSpace.return_value = {
+            "capacityEfficiency": {u'compaction': 594.4},
+            "rawFreeMiB": 1024.0 * 6,
+            "usableFreeMiB": 1024.0 * 3
+        }
+        stat_capabilities = {
+            THROUGHPUT: 0,
+            BANDWIDTH: 0,
+            LATENCY: 0,
+            IO_SIZE: 0,
+            QUEUE_LENGTH: 0,
+            AVG_BUSY_PERC: 0
+        }
+
+        mock_client.getCPGStatData.return_value = stat_capabilities
+
+        with mock.patch.object(hpcommon.HP3PARCommon,
+                               '_create_client') as mock_create_client:
+            mock_create_client.return_value = mock_client
+            common = self.driver._login()
+
+            stats = self.driver.get_volume_stats(True)
+            const = 0.0009765625
+            self.assertEqual('FC', stats['storage_protocol'])
+            self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
+            self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
+            self.assertEqual(86.0,
+                             stats['pools'][0]['provisioned_capacity_gb'])
+            self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
+            self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
+            self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(stat_capabilities[THROUGHPUT],
+                             stats['pools'][0][THROUGHPUT])
+            self.assertEqual(stat_capabilities[BANDWIDTH],
+                             stats['pools'][0][BANDWIDTH])
+            self.assertEqual(stat_capabilities[LATENCY],
+                             stats['pools'][0][LATENCY])
+            self.assertEqual(stat_capabilities[IO_SIZE],
+                             stats['pools'][0][IO_SIZE])
+            self.assertEqual(stat_capabilities[QUEUE_LENGTH],
+                             stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(stat_capabilities[AVG_BUSY_PERC],
+                             stats['pools'][0][AVG_BUSY_PERC])
+
+            expected = [
+                mock.call.getStorageSystemInfo(),
+                mock.call.getCPG(HP3PAR_CPG),
+                mock.call.getCPGStatData(HP3PAR_CPG, 'daily', '7d'),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG),
+                mock.call.getCPG(HP3PAR_CPG2),
+                mock.call.getCPGStatData(HP3PAR_CPG2, 'daily', '7d'),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG2)]
+
+            mock_client.assert_has_calls(
+                self.standard_login +
+                expected +
+                self.standard_logout)
+            stats = self.driver.get_volume_stats(True)
+            self.assertEqual('FC', stats['storage_protocol'])
+            self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
+            self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
+            self.assertEqual(86.0,
+                             stats['pools'][0]['provisioned_capacity_gb'])
+            self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
+            self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
+            self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(stat_capabilities[THROUGHPUT],
+                             stats['pools'][0][THROUGHPUT])
+            self.assertEqual(stat_capabilities[BANDWIDTH],
+                             stats['pools'][0][BANDWIDTH])
+            self.assertEqual(stat_capabilities[LATENCY],
+                             stats['pools'][0][LATENCY])
+            self.assertEqual(stat_capabilities[IO_SIZE],
+                             stats['pools'][0][IO_SIZE])
+            self.assertEqual(stat_capabilities[QUEUE_LENGTH],
+                             stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(stat_capabilities[AVG_BUSY_PERC],
+                             stats['pools'][0][AVG_BUSY_PERC])
+
+            cpg2 = self.cpgs[0].copy()
+            cpg2.update({'SDGrowth': {'limitMiB': 8192}})
+            mock_client.getCPG.return_value = cpg2
+
+            stats = self.driver.get_volume_stats(True)
+            self.assertEqual('FC', stats['storage_protocol'])
+            self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
+            self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
+            total_capacity_gb = 8192 * const
+            self.assertEqual(total_capacity_gb,
+                             stats['pools'][0]['total_capacity_gb'])
+            free_capacity_gb = int(
+                (8192 - (self.cpgs[0]['UsrUsage']['usedMiB'] +
+                         self.cpgs[0]['SDUsage']['usedMiB'])) * const)
+            self.assertEqual(free_capacity_gb,
+                             stats['pools'][0]['free_capacity_gb'])
+            provisioned_capacity_gb = int(
+                (self.cpgs[0]['UsrUsage']['totalMiB'] +
+                 self.cpgs[0]['SAUsage']['totalMiB'] +
+                 self.cpgs[0]['SDUsage']['totalMiB']) * const)
+            self.assertEqual(provisioned_capacity_gb,
+                             stats['pools'][0]['provisioned_capacity_gb'])
+            cap_util = (float(total_capacity_gb - free_capacity_gb) /
+                        float(total_capacity_gb)) * 100
+            self.assertEqual(cap_util,
+                             stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(stat_capabilities[THROUGHPUT],
+                             stats['pools'][0][THROUGHPUT])
+            self.assertEqual(stat_capabilities[BANDWIDTH],
+                             stats['pools'][0][BANDWIDTH])
+            self.assertEqual(stat_capabilities[LATENCY],
+                             stats['pools'][0][LATENCY])
+            self.assertEqual(stat_capabilities[IO_SIZE],
+                             stats['pools'][0][IO_SIZE])
+            self.assertEqual(stat_capabilities[QUEUE_LENGTH],
+                             stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(stat_capabilities[AVG_BUSY_PERC],
+                             stats['pools'][0][AVG_BUSY_PERC])
+            common.client.deleteCPG(HP3PAR_CPG)
+            common.client.createCPG(HP3PAR_CPG, {})
+
+    @mock.patch('hp3parclient.version', "3.2.2")
+    def test_get_volume_stats2(self):
+        # Testing when the API_VERSION is incompatible with getCPGStatData
+        srstatld_api_version = 30201200
+        pre_srstatld_api_version = srstatld_api_version - 1
+        wsapi = {'build': pre_srstatld_api_version}
+        config = self.setup_configuration()
+        config.filter_function = FILTER_FUNCTION
+        config.goodness_function = GOODNESS_FUNCTION
+        mock_client = self.setup_driver(config=config, wsapi_version=wsapi)
+        mock_client.getCPG.return_value = self.cpgs[0]
+        mock_client.getStorageSystemInfo.return_value = {
+            'serialNumber': '1234'
+        }
+
+        # cpg has no limit
+        mock_client.getCPGAvailableSpace.return_value = {
+            "capacityEfficiency": {u'compaction': 594.4},
+            "rawFreeMiB": 1024.0 * 6,
+            "usableFreeMiB": 1024.0 * 3
+        }
+
+        with mock.patch.object(hpcommon.HP3PARCommon,
+                               '_create_client') as mock_create_client:
+            mock_create_client.return_value = mock_client
+            self.driver._login()
+
+            stats = self.driver.get_volume_stats(True)
+            self.assertEqual('FC', stats['storage_protocol'])
+            self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
+            self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
+            self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(None, stats['pools'][0][THROUGHPUT])
+            self.assertEqual(None, stats['pools'][0][BANDWIDTH])
+            self.assertEqual(None, stats['pools'][0][LATENCY])
+            self.assertEqual(None, stats['pools'][0][IO_SIZE])
+            self.assertEqual(None, stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(None, stats['pools'][0][AVG_BUSY_PERC])
+
+            expected = [
+                mock.call.getStorageSystemInfo(),
+                mock.call.getCPG(HP3PAR_CPG),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG),
+                mock.call.getCPG(HP3PAR_CPG2),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG2)]
+
+            mock_client.assert_has_calls(
+                self.standard_login +
+                expected +
+                self.standard_logout)
+
+    @mock.patch('hp3parclient.version', "3.2.1")
+    def test_get_volume_stats3(self):
+        # Testing when the client version is incompatible with getCPGStatData
         # setup_mock_client drive with the configuration
         # and return the mock HTTP 3PAR client
         config = self.setup_configuration()
@@ -3418,21 +3649,24 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
         with mock.patch.object(hpcommon.HP3PARCommon,
                                '_create_client') as mock_create_client:
             mock_create_client.return_value = mock_client
-            common = self.driver._login()
+            self.driver._login()
 
             stats = self.driver.get_volume_stats(True)
-            const = 0.0009765625
-            self.assertEqual(stats['storage_protocol'], 'FC')
-            self.assertEqual(stats['total_capacity_gb'], 0)
-            self.assertEqual(stats['free_capacity_gb'], 0)
-            self.assertEqual(stats['pools'][0]['total_capacity_gb'], 24.0)
-            self.assertEqual(stats['pools'][0]['free_capacity_gb'], 3.0)
-            self.assertEqual(stats['pools'][0]['capacity_utilization'], 87.5)
-            self.assertEqual(stats['pools'][0]['total_volumes'], 3)
-            self.assertEqual(stats['pools'][0]['goodness_function'],
-                             GOODNESS_FUNCTION)
-            self.assertEqual(stats['pools'][0]['filter_function'],
-                             FILTER_FUNCTION)
+            self.assertEqual('FC', stats['storage_protocol'])
+            self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
+            self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
+            self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(None, stats['pools'][0][THROUGHPUT])
+            self.assertEqual(None, stats['pools'][0][BANDWIDTH])
+            self.assertEqual(None, stats['pools'][0][LATENCY])
+            self.assertEqual(None, stats['pools'][0][IO_SIZE])
+            self.assertEqual(None, stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(None, stats['pools'][0][AVG_BUSY_PERC])
 
             expected = [
                 mock.call.getStorageSystemInfo(),
@@ -3445,46 +3679,6 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            stats = self.driver.get_volume_stats(True)
-            self.assertEqual(stats['storage_protocol'], 'FC')
-            self.assertEqual(stats['total_capacity_gb'], 0)
-            self.assertEqual(stats['free_capacity_gb'], 0)
-            self.assertEqual(stats['pools'][0]['total_capacity_gb'], 24.0)
-            self.assertEqual(stats['pools'][0]['free_capacity_gb'], 3.0)
-            self.assertEqual(stats['pools'][0]['capacity_utilization'], 87.5)
-            self.assertEqual(stats['pools'][0]['total_volumes'], 3)
-            self.assertEqual(stats['pools'][0]['goodness_function'],
-                             GOODNESS_FUNCTION)
-            self.assertEqual(stats['pools'][0]['filter_function'],
-                             FILTER_FUNCTION)
-
-            cpg2 = self.cpgs[0].copy()
-            cpg2.update({'SDGrowth': {'limitMiB': 8192}})
-            mock_client.getCPG.return_value = cpg2
-
-            stats = self.driver.get_volume_stats(True)
-            self.assertEqual(stats['storage_protocol'], 'FC')
-            total_capacity_gb = 8192 * const
-            self.assertEqual(stats['total_capacity_gb'], 0)
-            self.assertEqual(stats['pools'][0]['total_capacity_gb'],
-                             total_capacity_gb)
-            free_capacity_gb = int(
-                (8192 - (self.cpgs[0]['UsrUsage']['usedMiB'] +
-                         self.cpgs[0]['SDUsage']['usedMiB'])) * const)
-            self.assertEqual(stats['free_capacity_gb'], 0)
-            self.assertEqual(stats['pools'][0]['free_capacity_gb'],
-                             free_capacity_gb)
-            cap_util = (float(total_capacity_gb - free_capacity_gb) /
-                        float(total_capacity_gb)) * 100
-            self.assertEqual(stats['pools'][0]['capacity_utilization'],
-                             cap_util)
-            self.assertEqual(stats['pools'][0]['total_volumes'], 3)
-            self.assertEqual(stats['pools'][0]['goodness_function'],
-                             GOODNESS_FUNCTION)
-            self.assertEqual(stats['pools'][0]['filter_function'],
-                             FILTER_FUNCTION)
-            common.client.deleteCPG(HP3PAR_CPG)
-            common.client.createCPG(HP3PAR_CPG, {})
 
     def test_create_host(self):
         # setup_mock_client drive with default configuration
@@ -3535,7 +3729,7 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
+            self.assertEqual(self.FAKE_HOST, host['name'])
 
     def test_create_invalid_host(self):
         # setup_mock_client drive with default configuration
@@ -3574,7 +3768,7 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], 'fakehost.foo')
+            self.assertEqual('fakehost.foo', host['name'])
 
     def test_create_modify_host(self):
         # setup_mock_client drive with default configuration
@@ -3608,8 +3802,8 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
-            self.assertEqual(len(host['FCPaths']), 2)
+            self.assertEqual(self.FAKE_HOST, host['name'])
+            self.assertEqual(2, len(host['FCPaths']))
 
     def test_modify_host_with_new_wwn(self):
         # setup_mock_client drive with default configuration
@@ -3646,8 +3840,8 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
-            self.assertEqual(len(host['FCPaths']), 2)
+            self.assertEqual(self.FAKE_HOST, host['name'])
+            self.assertEqual(2, len(host['FCPaths']))
 
     def test_modify_host_with_unknown_wwn_and_new_wwn(self):
         # setup_mock_client drive with default configuration
@@ -3686,8 +3880,8 @@ class TestHP3PARFCDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
-            self.assertEqual(len(host['FCPaths']), 3)
+            self.assertEqual(self.FAKE_HOST, host['name'])
+            self.assertEqual(3, len(host['FCPaths']))
 
 
 class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
@@ -3703,6 +3897,15 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             'target_iqn': TARGET_IQN,
             'target_lun': TARGET_LUN,
             'target_portal': '1.1.1.2:1234'}}
+
+    multipath_properties = {
+        'driver_volume_type': 'iscsi',
+        'data':
+        {'encrypted': False,
+            'target_discovered': True,
+            'target_iqns': [TARGET_IQN],
+            'target_luns': [TARGET_LUN],
+            'target_portals': ['1.1.1.2:1234']}}
 
     def setup_driver(self, config=None, mock_conf=None, wsapi_version=None):
 
@@ -3788,6 +3991,123 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             self.assertDictMatch(result, self.properties)
 
+    def test_initialize_connection_multipath(self):
+        # setup_mock_client drive with default configuration
+        # and return the mock HTTP 3PAR client
+        mock_client = self.setup_driver()
+        mock_client.getVolume.return_value = {'userCPG': HP3PAR_CPG}
+        mock_client.getCPG.return_value = {}
+        mock_client.getHost.side_effect = [
+            hpexceptions.HTTPNotFound('fake'),
+            {'name': self.FAKE_HOST}]
+        mock_client.queryHost.return_value = {
+            'members': [{
+                'name': self.FAKE_HOST
+            }]
+        }
+
+        mock_client.getHostVLUNs.side_effect = [
+            hpexceptions.HTTPNotFound('fake'),
+            [{'active': True,
+              'volumeName': self.VOLUME_3PAR_NAME,
+              'lun': self.TARGET_LUN, 'type': 0,
+              'portPos': {'node': 8, 'slot': 1, 'cardPort': 1}}]]
+
+        location = ("%(volume_name)s,%(lun_id)s,%(host)s,%(nsp)s" %
+                    {'volume_name': self.VOLUME_3PAR_NAME,
+                     'lun_id': self.TARGET_LUN,
+                     'host': self.FAKE_HOST,
+                     'nsp': 'something'})
+        mock_client.createVLUN.return_value = location
+
+        mock_client.getiSCSIPorts.return_value = [{
+            'IPAddr': '1.1.1.2',
+            'iSCSIName': self.TARGET_IQN,
+        }]
+
+        with mock.patch.object(hpcommon.HP3PARCommon,
+                               '_create_client') as mock_create_client:
+            mock_create_client.return_value = mock_client
+            result = self.driver.initialize_connection(
+                self.volume,
+                self.connector_multipath_enabled)
+
+            expected = [
+                mock.call.getVolume(self.VOLUME_3PAR_NAME),
+                mock.call.getCPG(HP3PAR_CPG),
+                mock.call.getHost(self.FAKE_HOST),
+                mock.call.queryHost(iqns=['iqn.1993-08.org.debian:01:222']),
+                mock.call.getHost(self.FAKE_HOST),
+                mock.call.getiSCSIPorts(
+                    state=self.mock_client_conf['PORT_STATE_READY']),
+                mock.call.getHostVLUNs(self.FAKE_HOST),
+                mock.call.createVLUN(
+                    self.VOLUME_3PAR_NAME,
+                    auto=True,
+                    hostname=self.FAKE_HOST,
+                    portPos=self.FAKE_ISCSI_PORT['portPos']),
+                mock.call.getHostVLUNs(self.FAKE_HOST)]
+
+            mock_client.assert_has_calls(
+                self.standard_login +
+                expected +
+                self.standard_logout)
+
+            self.assertDictMatch(self.multipath_properties, result)
+
+    def test_initialize_connection_multipath_existing_nsp(self):
+        # setup_mock_client drive with default configuration
+        # and return the mock HTTP 3PAR client
+        mock_client = self.setup_driver()
+        mock_client.getVolume.return_value = {'userCPG': HP3PAR_CPG}
+        mock_client.getCPG.return_value = {}
+        mock_client.getHost.side_effect = [
+            hpexceptions.HTTPNotFound('fake'),
+            {'name': self.FAKE_HOST}]
+        mock_client.queryHost.return_value = {
+            'members': [{
+                'name': self.FAKE_HOST
+            }]
+        }
+
+        mock_client.getHostVLUNs.side_effect = [
+            [{'hostname': self.FAKE_HOST,
+              'volumeName': self.VOLUME_3PAR_NAME,
+              'lun': self.TARGET_LUN,
+              'portPos': {'node': 8, 'slot': 1, 'cardPort': 1}}],
+            [{'active': True,
+              'volumeName': self.VOLUME_3PAR_NAME,
+              'lun': self.TARGET_LUN, 'type': 0}]]
+
+        mock_client.getiSCSIPorts.return_value = [{
+            'IPAddr': '1.1.1.2',
+            'iSCSIName': self.TARGET_IQN,
+        }]
+
+        with mock.patch.object(hpcommon.HP3PARCommon,
+                               '_create_client') as mock_create_client:
+            mock_create_client.return_value = mock_client
+            result = self.driver.initialize_connection(
+                self.volume,
+                self.connector_multipath_enabled)
+
+            expected = [
+                mock.call.getVolume(self.VOLUME_3PAR_NAME),
+                mock.call.getCPG(HP3PAR_CPG),
+                mock.call.getHost(self.FAKE_HOST),
+                mock.call.queryHost(iqns=['iqn.1993-08.org.debian:01:222']),
+                mock.call.getHost(self.FAKE_HOST),
+                mock.call.getiSCSIPorts(
+                    state=self.mock_client_conf['PORT_STATE_READY']),
+                mock.call.getHostVLUNs(self.FAKE_HOST)]
+
+            mock_client.assert_has_calls(
+                self.standard_login +
+                expected +
+                self.standard_logout)
+
+            self.assertDictMatch(self.multipath_properties, result)
+
     def test_initialize_connection_encrypted(self):
         # setup_mock_client drive with default configuration
         # and return the mock HTTP 3PAR client
@@ -3843,6 +4163,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             expected_properties['data']['encrypted'] = True
             self.assertDictMatch(result, self.properties)
 
+    @mock.patch('hp3parclient.version', "3.2.2")
     def test_get_volume_stats(self):
         # setup_mock_client drive with the configuration
         # and return the mock HTTP 3PAR client
@@ -3860,6 +4181,15 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             "rawFreeMiB": 1024.0 * 6,
             "usableFreeMiB": 1024.0 * 3
         }
+        stat_capabilities = {
+            THROUGHPUT: 0,
+            BANDWIDTH: 0,
+            LATENCY: 0,
+            IO_SIZE: 0,
+            QUEUE_LENGTH: 0,
+            AVG_BUSY_PERC: 0
+        }
+        mock_client.getCPGStatData.return_value = stat_capabilities
 
         with mock.patch.object(hpcommon.HP3PARCommon,
                                '_create_client') as mock_create_client:
@@ -3867,17 +4197,133 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             stats = self.driver.get_volume_stats(True)
             const = 0.0009765625
-            self.assertEqual(stats['storage_protocol'], 'iSCSI')
-            self.assertEqual(stats['total_capacity_gb'], 0)
-            self.assertEqual(stats['free_capacity_gb'], 0)
-            self.assertEqual(stats['pools'][0]['total_capacity_gb'], 24.0)
-            self.assertEqual(stats['pools'][0]['free_capacity_gb'], 3.0)
-            self.assertEqual(stats['pools'][0]['capacity_utilization'], 87.5)
-            self.assertEqual(stats['pools'][0]['total_volumes'], 3)
-            self.assertEqual(stats['pools'][0]['goodness_function'],
-                             GOODNESS_FUNCTION)
-            self.assertEqual(stats['pools'][0]['filter_function'],
-                             FILTER_FUNCTION)
+            self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
+            self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
+            self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
+            self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
+            self.assertEqual(86.0,
+                             stats['pools'][0]['provisioned_capacity_gb'])
+            self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(stat_capabilities[THROUGHPUT],
+                             stats['pools'][0][THROUGHPUT])
+            self.assertEqual(stat_capabilities[BANDWIDTH],
+                             stats['pools'][0][BANDWIDTH])
+            self.assertEqual(stat_capabilities[LATENCY],
+                             stats['pools'][0][LATENCY])
+            self.assertEqual(stat_capabilities[IO_SIZE],
+                             stats['pools'][0][IO_SIZE])
+            self.assertEqual(stat_capabilities[QUEUE_LENGTH],
+                             stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(stat_capabilities[AVG_BUSY_PERC],
+                             stats['pools'][0][AVG_BUSY_PERC])
+
+            expected = [
+                mock.call.getStorageSystemInfo(),
+                mock.call.getCPG(HP3PAR_CPG),
+                mock.call.getCPGStatData(HP3PAR_CPG, 'daily', '7d'),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG),
+                mock.call.getCPG(HP3PAR_CPG2),
+                mock.call.getCPGStatData(HP3PAR_CPG2, 'daily', '7d'),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG2)]
+
+            mock_client.assert_has_calls(
+                self.standard_login +
+                expected +
+                self.standard_logout)
+
+            cpg2 = self.cpgs[0].copy()
+            cpg2.update({'SDGrowth': {'limitMiB': 8192}})
+            mock_client.getCPG.return_value = cpg2
+
+            stats = self.driver.get_volume_stats(True)
+            self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
+            self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
+            total_capacity_gb = 8192 * const
+            self.assertEqual(total_capacity_gb,
+                             stats['pools'][0]['total_capacity_gb'])
+            free_capacity_gb = int(
+                (8192 - (self.cpgs[0]['UsrUsage']['usedMiB'] +
+                         self.cpgs[0]['SDUsage']['usedMiB'])) * const)
+            self.assertEqual(free_capacity_gb,
+                             stats['pools'][0]['free_capacity_gb'])
+            cap_util = (float(total_capacity_gb - free_capacity_gb) /
+                        float(total_capacity_gb)) * 100
+            self.assertEqual(cap_util,
+                             stats['pools'][0]['capacity_utilization'])
+            provisioned_capacity_gb = int(
+                (self.cpgs[0]['UsrUsage']['totalMiB'] +
+                 self.cpgs[0]['SAUsage']['totalMiB'] +
+                 self.cpgs[0]['SDUsage']['totalMiB']) * const)
+            self.assertEqual(provisioned_capacity_gb,
+                             stats['pools'][0]['provisioned_capacity_gb'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(stat_capabilities[THROUGHPUT],
+                             stats['pools'][0][THROUGHPUT])
+            self.assertEqual(stat_capabilities[BANDWIDTH],
+                             stats['pools'][0][BANDWIDTH])
+            self.assertEqual(stat_capabilities[LATENCY],
+                             stats['pools'][0][LATENCY])
+            self.assertEqual(stat_capabilities[IO_SIZE],
+                             stats['pools'][0][IO_SIZE])
+            self.assertEqual(stat_capabilities[QUEUE_LENGTH],
+                             stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(stat_capabilities[AVG_BUSY_PERC],
+                             stats['pools'][0][AVG_BUSY_PERC])
+
+    @mock.patch('hp3parclient.version', "3.2.2")
+    def test_get_volume_stats2(self):
+        # Testing when the API_VERSION is incompatible with getCPGStatData
+        srstatld_api_version = 30201200
+        pre_srstatld_api_version = srstatld_api_version - 1
+        wsapi = {'build': pre_srstatld_api_version}
+        config = self.setup_configuration()
+        config.filter_function = FILTER_FUNCTION
+        config.goodness_function = GOODNESS_FUNCTION
+        mock_client = self.setup_driver(config=config, wsapi_version=wsapi)
+        mock_client.getCPG.return_value = self.cpgs[0]
+        mock_client.getStorageSystemInfo.return_value = {
+            'serialNumber': '1234'
+        }
+
+        # cpg has no limit
+        mock_client.getCPGAvailableSpace.return_value = {
+            "capacityEfficiency": {u'compaction': 594.4},
+            "rawFreeMiB": 1024.0 * 6,
+            "usableFreeMiB": 1024.0 * 3
+        }
+
+        with mock.patch.object(hpcommon.HP3PARCommon,
+                               '_create_client') as mock_create_client:
+            mock_create_client.return_value = mock_client
+            self.driver._login()
+
+            stats = self.driver.get_volume_stats(True)
+            self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
+            self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
+            self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(None, stats['pools'][0][THROUGHPUT])
+            self.assertEqual(None, stats['pools'][0][BANDWIDTH])
+            self.assertEqual(None, stats['pools'][0][LATENCY])
+            self.assertEqual(None, stats['pools'][0][IO_SIZE])
+            self.assertEqual(None, stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(None, stats['pools'][0][AVG_BUSY_PERC])
 
             expected = [
                 mock.call.getStorageSystemInfo(),
@@ -3891,31 +4337,60 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
                 expected +
                 self.standard_logout)
 
-            cpg2 = self.cpgs[0].copy()
-            cpg2.update({'SDGrowth': {'limitMiB': 8192}})
-            mock_client.getCPG.return_value = cpg2
+    @mock.patch('hp3parclient.version', "3.2.1")
+    def test_get_volume_stats3(self):
+        # Testing when the client version is incompatible with getCPGStatData
+        # setup_mock_client drive with the configuration
+        # and return the mock HTTP 3PAR client
+        config = self.setup_configuration()
+        config.filter_function = FILTER_FUNCTION
+        config.goodness_function = GOODNESS_FUNCTION
+        mock_client = self.setup_driver(config=config)
+        mock_client.getCPG.return_value = self.cpgs[0]
+        mock_client.getStorageSystemInfo.return_value = {
+            'serialNumber': '1234'
+        }
+
+        # cpg has no limit
+        mock_client.getCPGAvailableSpace.return_value = {
+            "capacityEfficiency": {u'compaction': 594.4},
+            "rawFreeMiB": 1024.0 * 6,
+            "usableFreeMiB": 1024.0 * 3
+        }
+
+        with mock.patch.object(hpcommon.HP3PARCommon,
+                               '_create_client') as mock_create_client:
+            mock_create_client.return_value = mock_client
+            self.driver._login()
 
             stats = self.driver.get_volume_stats(True)
-            self.assertEqual(stats['storage_protocol'], 'iSCSI')
-            total_capacity_gb = 8192 * const
-            self.assertEqual(stats['total_capacity_gb'], 0)
-            self.assertEqual(stats['pools'][0]['total_capacity_gb'],
-                             total_capacity_gb)
-            free_capacity_gb = int(
-                (8192 - (self.cpgs[0]['UsrUsage']['usedMiB'] +
-                         self.cpgs[0]['SDUsage']['usedMiB'])) * const)
-            self.assertEqual(stats['free_capacity_gb'], 0)
-            self.assertEqual(stats['pools'][0]['free_capacity_gb'],
-                             free_capacity_gb)
-            cap_util = (float(total_capacity_gb - free_capacity_gb) /
-                        float(total_capacity_gb)) * 100
-            self.assertEqual(stats['pools'][0]['capacity_utilization'],
-                             cap_util)
-            self.assertEqual(stats['pools'][0]['total_volumes'], 3)
-            self.assertEqual(stats['pools'][0]['goodness_function'],
-                             GOODNESS_FUNCTION)
-            self.assertEqual(stats['pools'][0]['filter_function'],
-                             FILTER_FUNCTION)
+            self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
+            self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
+            self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
+            self.assertEqual(3, stats['pools'][0]['total_volumes'])
+            self.assertEqual(GOODNESS_FUNCTION,
+                             stats['pools'][0]['goodness_function'])
+            self.assertEqual(FILTER_FUNCTION,
+                             stats['pools'][0]['filter_function'])
+            self.assertEqual(None, stats['pools'][0][THROUGHPUT])
+            self.assertEqual(None, stats['pools'][0][BANDWIDTH])
+            self.assertEqual(None, stats['pools'][0][LATENCY])
+            self.assertEqual(None, stats['pools'][0][IO_SIZE])
+            self.assertEqual(None, stats['pools'][0][QUEUE_LENGTH])
+            self.assertEqual(None, stats['pools'][0][AVG_BUSY_PERC])
+
+            expected = [
+                mock.call.getStorageSystemInfo(),
+                mock.call.getCPG(HP3PAR_CPG),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG),
+                mock.call.getCPG(HP3PAR_CPG2),
+                mock.call.getCPGAvailableSpace(HP3PAR_CPG2)]
+
+            mock_client.assert_has_calls(
+                self.standard_login +
+                expected +
+                self.standard_logout)
 
     def test_create_host(self):
         # setup_mock_client drive with default configuration
@@ -3949,9 +4424,9 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
-            self.assertEqual(auth_username, None)
-            self.assertEqual(auth_password, None)
+            self.assertEqual(self.FAKE_HOST, host['name'])
+            self.assertEqual(None, auth_username)
+            self.assertEqual(None, auth_password)
 
     def test_create_host_chap_enabled(self):
         # setup_mock_client drive with CHAP enabled configuration
@@ -4012,9 +4487,9 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
-            self.assertEqual(auth_username, 'test-user')
-            self.assertEqual(auth_password, 'test-pass')
+            self.assertEqual(self.FAKE_HOST, host['name'])
+            self.assertEqual('test-user', auth_username)
+            self.assertEqual('test-pass', auth_password)
 
     def test_create_invalid_host(self):
         # setup_mock_client drive with default configuration
@@ -4047,9 +4522,9 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], 'fakehost.foo')
-            self.assertEqual(auth_username, None)
-            self.assertEqual(auth_password, None)
+            self.assertEqual('fakehost.foo', host['name'])
+            self.assertEqual(None, auth_username)
+            self.assertEqual(None, auth_password)
 
     def test_create_invalid_host_chap_enabled(self):
         # setup_mock_client drive with CHAP enabled configuration
@@ -4110,9 +4585,9 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], 'fakehost.foo')
-            self.assertEqual(auth_username, 'test-user')
-            self.assertEqual(auth_password, 'test-pass')
+            self.assertEqual('fakehost.foo', host['name'])
+            self.assertEqual('test-user', auth_username)
+            self.assertEqual('test-pass', auth_password)
 
     def test_create_modify_host(self):
         # setup_mock_client drive with default configuration
@@ -4145,10 +4620,10 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
-            self.assertEqual(auth_username, None)
-            self.assertEqual(auth_password, None)
-            self.assertEqual(len(host['FCPaths']), 2)
+            self.assertEqual(self.FAKE_HOST, host['name'])
+            self.assertEqual(None, auth_username)
+            self.assertEqual(None, auth_password)
+            self.assertEqual(2, len(host['FCPaths']))
 
     def test_create_modify_host_chap_enabled(self):
         # setup_mock_client drive with CHAP enabled configuration
@@ -4209,10 +4684,10 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
 
             mock_client.assert_has_calls(expected)
 
-            self.assertEqual(host['name'], self.FAKE_HOST)
-            self.assertEqual(auth_username, 'test-user')
-            self.assertEqual(auth_password, 'test-pass')
-            self.assertEqual(len(host['FCPaths']), 2)
+            self.assertEqual(self.FAKE_HOST, host['name'])
+            self.assertEqual('test-user', auth_username)
+            self.assertEqual('test-pass', auth_password)
+            self.assertEqual(2, len(host['FCPaths']))
 
     def test_get_least_used_nsp_for_host_single(self):
         # setup_mock_client drive with default configuration
@@ -4234,7 +4709,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             self.driver.initialize_iscsi_ports(common)
 
             nsp = self.driver._get_least_used_nsp_for_host(common, 'newhost')
-            self.assertEqual(nsp, "1:8:1")
+            self.assertEqual("1:8:1", nsp)
 
     def test_get_least_used_nsp_for_host_new(self):
         # setup_mock_client drive with default configuration
@@ -4258,7 +4733,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             # Host 'newhost' does not yet have any iscsi paths,
             # so the 'least used' is returned
             nsp = self.driver._get_least_used_nsp_for_host(common, 'newhost')
-            self.assertEqual(nsp, "1:8:2")
+            self.assertEqual("1:8:2", nsp)
 
     def test_get_least_used_nsp_for_host_reuse(self):
         # setup_mock_client drive with default configuration
@@ -4282,10 +4757,10 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             # hosts 'foo' and 'bar' already have active iscsi paths
             # the same one should be used
             nsp = self.driver._get_least_used_nsp_for_host(common, 'foo')
-            self.assertEqual(nsp, "1:8:2")
+            self.assertEqual("1:8:2", nsp)
 
             nsp = self.driver._get_least_used_nsp_for_host(common, 'bar')
-            self.assertEqual(nsp, "1:8:1")
+            self.assertEqual("1:8:1", nsp)
 
     def test_get_least_used_nps_for_host_fc(self):
         # setup_mock_client drive with default configuration
@@ -4306,8 +4781,8 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             self.driver.initialize_iscsi_ports(common)
 
             nsp = self.driver._get_least_used_nsp_for_host(common, 'newhost')
-            self.assertNotEqual(nsp, "0:6:3")
-            self.assertEqual(nsp, "1:8:1")
+            self.assertNotEqual("0:6:3", nsp)
+            self.assertEqual("1:8:1", nsp)
 
     def test_invalid_iscsi_ip(self):
         config = self.setup_configuration()
@@ -4364,7 +4839,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             vluns = common.client.getVLUNs()
             nsp = self.driver._get_least_used_nsp(common, vluns['members'],
                                                   ['0:2:1', '1:8:1'])
-            self.assertEqual(nsp, '1:8:1')
+            self.assertEqual('1:8:1', nsp)
 
             ports = [
                 {'portPos': {'node': 1, 'slot': 2, 'cardPort': 1},
@@ -4393,7 +4868,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             vluns = common.client.getVLUNs()
             nsp = self.driver._get_least_used_nsp(common, vluns['members'],
                                                   ['0:2:1', '1:2:1'])
-            self.assertEqual(nsp, '1:2:1')
+            self.assertEqual('1:2:1', nsp)
 
             ports = [
                 {'portPos': {'node': 1, 'slot': 2, 'cardPort': 1},
@@ -4422,7 +4897,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             vluns = common.client.getVLUNs()
             nsp = self.driver._get_least_used_nsp(common, vluns['members'],
                                                   ['1:1:1', '1:2:1'])
-            self.assertEqual(nsp, '1:1:1')
+            self.assertEqual('1:1:1', nsp)
 
     def test_set_3par_chaps(self):
         # setup_mock_client drive with default configuration
@@ -4663,7 +5138,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             common = self.driver._login()
             model = self.driver._do_export(common, volume)
             mock_client.assert_has_calls(expected)
-            self.assertEqual(model, expected_model)
+            self.assertEqual(expected_model, model)
 
     def test_ensure_export(self):
         # setup_mock_client drive with default configuration
@@ -4694,7 +5169,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            self.assertEqual(model, expected_model)
+            self.assertEqual(expected_model, model)
 
             mock_client.getAllVolumeMetaData.return_value = {
                 'total': 2,
@@ -4727,7 +5202,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            self.assertEqual(model, expected_model)
+            self.assertEqual(expected_model, model)
 
     def test_ensure_export_missing_volume(self):
         # setup_mock_client drive with default configuration
@@ -4753,7 +5228,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
                 self.standard_login +
                 expected +
                 self.standard_logout)
-            self.assertEqual(model, expected_model)
+            self.assertEqual(expected_model, model)
 
     @mock.patch.object(volume_types, 'get_volume_type')
     def test_get_volume_settings_default_pool(self, _mock_volume_types):
@@ -4771,7 +5246,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
                       'id': 'd03338a9-9115-48a3-8dfc-35cdfcdc15a7'}
             pool = volume_utils.extract_host(volume['host'], 'pool')
             model = common.get_volume_settings_from_type_id('gold-id', pool)
-            self.assertEqual(model['cpg'], 'pool_foo')
+            self.assertEqual('pool_foo', model['cpg'])
 
     def test_get_model_update(self):
         mock_client = self.setup_driver()
@@ -4781,7 +5256,7 @@ class TestHP3PARISCSIDriver(HP3PARBaseDriver, test.TestCase):
             common = self.driver._login()
 
             model_update = common._get_model_update('xxx@yyy#zzz', 'CPG')
-            self.assertEqual(model_update, {'host': 'xxx@yyy#CPG'})
+            self.assertEqual({'host': 'xxx@yyy#CPG'}, model_update)
 
 VLUNS5_RET = ({'members':
                [{'portPos': {'node': 0, 'slot': 8, 'cardPort': 2},

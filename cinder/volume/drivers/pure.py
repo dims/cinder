@@ -22,7 +22,6 @@ import math
 import re
 import uuid
 
-from oslo_concurrency import processutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
@@ -30,6 +29,7 @@ from oslo_utils import units
 
 from cinder import exception
 from cinder.i18n import _, _LE, _LI, _LW
+from cinder import objects
 from cinder import utils
 from cinder.volume import driver
 from cinder.volume.drivers.san import san
@@ -205,7 +205,7 @@ class PureBaseVolumeDriver(san.SanDriver):
     def ensure_export(self, context, volume):
         pass
 
-    def create_export(self, context, volume):
+    def create_export(self, context, volume, connector):
         pass
 
     def _get_host(self, connector):
@@ -337,7 +337,8 @@ class PureBaseVolumeDriver(san.SanDriver):
 
     @log_debug_trace
     def create_consistencygroup_from_src(self, context, group, volumes,
-                                         cgsnapshot=None, snapshots=None):
+                                         cgsnapshot=None, snapshots=None,
+                                         source_cg=None, source_vols=None):
 
         if cgsnapshot and snapshots:
             self.create_consistencygroup(context, group)
@@ -406,7 +407,7 @@ class PureBaseVolumeDriver(san.SanDriver):
         pgsnap_suffix = self._get_pgroup_snap_suffix(cgsnapshot)
         self._array.create_pgroup_snapshot(pgroup_name, suffix=pgsnap_suffix)
 
-        snapshots = self.db.snapshot_get_all_for_cgsnapshot(
+        snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
             context, cgsnapshot.id)
 
         for snapshot in snapshots:
@@ -437,7 +438,7 @@ class PureBaseVolumeDriver(san.SanDriver):
                     LOG.warning(_LW("Unable to delete Protection Group "
                                     "Snapshot: %s"), err.text)
 
-        snapshots = self.db.snapshot_get_all_for_cgsnapshot(
+        snapshots = objects.SnapshotList.get_all_for_cgsnapshot(
             context, cgsnapshot.id)
 
         for snapshot in snapshots:
@@ -625,11 +626,9 @@ class PureISCSIDriver(PureBaseVolumeDriver, san.SanISCSIDriver):
         execute = kwargs.pop("execute", utils.execute)
         super(PureISCSIDriver, self).__init__(execute=execute, *args, **kwargs)
         self._storage_protocol = "iSCSI"
-        self._iscsi_port = None
 
     def do_setup(self, context):
         super(PureISCSIDriver, self).do_setup(context)
-        self._iscsi_port = self._choose_target_iscsi_port()
 
     def _get_host(self, connector):
         """Return dict describing existing Purity host object or None."""
@@ -642,18 +641,13 @@ class PureISCSIDriver(PureBaseVolumeDriver, san.SanISCSIDriver):
     @log_debug_trace
     def initialize_connection(self, volume, connector, initiator_data=None):
         """Allow connection to connector and return connection info."""
-        target_port = self._get_target_iscsi_port()
         connection = self._connect(volume, connector, initiator_data)
-        properties = {
-            "driver_volume_type": "iscsi",
-            "data": {
-                "target_iqn": target_port["iqn"],
-                "target_portal": target_port["portal"],
-                "target_lun": connection["lun"],
-                "target_discovered": True,
-                "access_mode": "rw",
-            },
-        }
+        target_ports = self._get_target_iscsi_ports()
+        multipath = connector.get("multipath", False)
+
+        properties = self._build_connection_properties(connection,
+                                                       target_ports,
+                                                       multipath)
 
         if self.configuration.use_chap_auth:
             properties["data"]["auth_method"] = "CHAP"
@@ -666,43 +660,44 @@ class PureISCSIDriver(PureBaseVolumeDriver, san.SanISCSIDriver):
 
         return properties
 
-    def _get_target_iscsi_port(self):
-        """Return dictionary describing iSCSI-enabled port on target array."""
-        try:
-            self._run_iscsiadm_bare(["-m", "discovery", "-t", "sendtargets",
-                                     "-p", self._iscsi_port["portal"]])
-        except processutils.ProcessExecutionError as err:
-            LOG.warning(_LW("iSCSI discovery of port %(port_name)s at "
-                            "%(port_portal)s failed with error: %(err_msg)s"),
-                        {"port_name": self._iscsi_port["name"],
-                         "port_portal": self._iscsi_port["portal"],
-                         "err_msg": err.stderr})
-            self._iscsi_port = self._choose_target_iscsi_port()
-        return self._iscsi_port
+    def _build_connection_properties(self, connection, target_ports,
+                                     multipath):
+        props = {
+            "driver_volume_type": "iscsi",
+            "data": {
+                "target_discovered": False,
+                "access_mode": "rw",
+                "discard": True,
+            },
+        }
 
-    @utils.retry(exception.PureDriverException, retries=3)
-    def _choose_target_iscsi_port(self):
-        """Find a reachable iSCSI-enabled port on target array."""
+        port_iter = iter(target_ports)
+
+        target_luns = []
+        target_iqns = []
+        target_portals = []
+
+        for port in port_iter:
+            target_luns.append(connection["lun"])
+            target_iqns.append(port["iqn"])
+            target_portals.append(port["portal"])
+
+        # If we have multiple ports always report them
+        if target_luns and target_iqns and target_portals:
+            props["data"]["target_luns"] = target_luns
+            props["data"]["target_iqns"] = target_iqns
+            props["data"]["target_portals"] = target_portals
+
+        return props
+
+    def _get_target_iscsi_ports(self):
+        """Return list of iSCSI-enabled port descriptions."""
         ports = self._array.list_ports()
         iscsi_ports = [port for port in ports if port["iqn"]]
-        for port in iscsi_ports:
-            try:
-                self._run_iscsiadm_bare(["-m", "discovery",
-                                         "-t", "sendtargets",
-                                         "-p", port["portal"]])
-            except processutils.ProcessExecutionError as err:
-                LOG.debug(("iSCSI discovery of port %(port_name)s at "
-                           "%(port_portal)s failed with error: %(err_msg)s"),
-                          {"port_name": port["name"],
-                           "port_portal": port["portal"],
-                           "err_msg": err.stderr})
-            else:
-                LOG.info(_LI("Using port %(name)s on the array at %(portal)s "
-                             "for iSCSI connectivity."),
-                         {"name": port["name"], "portal": port["portal"]})
-                return port
-        raise exception.PureDriverException(
-            reason=_("No reachable iSCSI-enabled ports on target array."))
+        if not iscsi_ports:
+            raise exception.PureDriverException(
+                reason=_("No iSCSI-enabled ports on target array."))
+        return iscsi_ports
 
     @staticmethod
     def _generate_chap_secret():
@@ -828,6 +823,7 @@ class PureFCDriver(PureBaseVolumeDriver, driver.FibreChannelDriver):
                 "target_wwn": target_wwns,
                 'access_mode': 'rw',
                 'initiator_target_map': init_targ_map,
+                "discard": True,
             }
         }
 

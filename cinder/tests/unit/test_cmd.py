@@ -732,6 +732,21 @@ class TestCinderManageCmd(test.TestCase):
             self.assertFalse(log_setup.called)
             self.assertEqual(2, exit.code)
 
+    @mock.patch('cinder.db')
+    def test_remove_service_failure(self, mock_db):
+        mock_db.service_destroy.side_effect = SystemExit(1)
+        service_commands = cinder_manage.ServiceCommands()
+        exit = service_commands.remove('abinary', 'ahost')
+        self.assertEqual(2, exit)
+
+    @mock.patch('cinder.db.service_destroy')
+    @mock.patch('cinder.db.service_get_by_args',
+                return_value = {'id': 'volID'})
+    def test_remove_service_success(self, mock_get_by_args,
+                                    mock_service_destroy):
+        service_commands = cinder_manage.ServiceCommands()
+        self.assertIsNone(service_commands.remove('abinary', 'ahost'))
+
 
 class TestCinderRtstoolCmd(test.TestCase):
 
@@ -1221,7 +1236,7 @@ class TestCinderVolumeUsageAuditCmd(test.TestCase):
         exit = self.assertRaises(SystemExit, volume_usage_audit.main)
 
         get_admin_context.assert_called_once_with()
-        self.assertEqual(CONF.project, 'cinder')
+        self.assertEqual('cinder', CONF.project)
         self.assertEqual(CONF.version, version.version_string())
         log_setup.assert_called_once_with(CONF, "cinder")
         get_logger.assert_called_once_with('cinder')
