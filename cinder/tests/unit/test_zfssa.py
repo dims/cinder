@@ -14,6 +14,7 @@
 """Unit tests for Oracle's ZFSSA Cinder volume driver."""
 
 import json
+import ssl
 
 import mock
 from oslo_utils import units
@@ -657,7 +658,11 @@ class TestRestClientURL(test.TestCase):
         _urlopen.return_value = mock.Mock()
         self.client.request(path, mock.ANY)
         _Request.assert_called_with(self.url + path, None, self.client.headers)
-        _urlopen.assert_called_with(mock.ANY, timeout=self.timeout)
+        if hasattr(ssl, '_create_unverified_context'):
+            _urlopen.assert_called_with(mock.ANY, context=mock.ANY,
+                                        timeout=self.timeout)
+        else:
+            _urlopen.assert_called_with(mock.ANY, timeout=self.timeout)
         _RestResult.assert_called_with(response=mock.ANY)
 
     @mock.patch.object(client, 'RestResult')
