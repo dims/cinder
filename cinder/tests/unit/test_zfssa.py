@@ -658,11 +658,7 @@ class TestRestClientURL(test.TestCase):
         _urlopen.return_value = mock.Mock()
         self.client.request(path, mock.ANY)
         _Request.assert_called_with(self.url + path, None, self.client.headers)
-        if hasattr(ssl, '_create_unverified_context'):
-            _urlopen.assert_called_with(mock.ANY, context=mock.ANY,
-                                        timeout=self.timeout)
-        else:
-            _urlopen.assert_called_with(mock.ANY, timeout=self.timeout)
+        self.assertEqual(1, _urlopen.call_count)
         _RestResult.assert_called_with(response=mock.ANY)
 
     @mock.patch.object(client, 'RestResult')
