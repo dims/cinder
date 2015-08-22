@@ -24,4 +24,4 @@ python-subunit>=0.0.18
 testtools>=1.4.0
 testrepository>=0.0.18
 tempest-lib>=0.6.1
-bandit>=0.10.1
+bandit>=0.13.2
