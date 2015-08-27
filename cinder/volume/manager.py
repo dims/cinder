@@ -189,7 +189,7 @@ def locked_snapshot_operation(f):
 class VolumeManager(manager.SchedulerDependentManager):
     """Manages attachable block storage devices."""
 
-    RPC_API_VERSION = '1.26'
+    RPC_API_VERSION = '1.27'
 
     target = messaging.Target(version=RPC_API_VERSION)
 
@@ -405,6 +405,10 @@ class VolumeManager(manager.SchedulerDependentManager):
         self.publish_service_capabilities(ctxt)
 
         # conditionally run replication status task
+
+        # FIXME(jdg): This should go away or be handled differently
+        #  if/when we're ready for V2 replication
+
         stats = self.driver.get_volume_stats(refresh=True)
         if stats and stats.get('replication', False):
 
@@ -413,6 +417,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                 self._update_replication_relationship_status(ctxt)
 
             self.add_periodic_task(run_replication_task)
+
         LOG.info(_LI("Driver initialization completed successfully."),
                  resource={'type': 'driver',
                            'id': self.driver.__class__.__name__})
@@ -961,6 +966,107 @@ class VolumeManager(manager.SchedulerDependentManager):
         self._notify_about_volume_usage(context, volume, "detach.end")
         LOG.info(_LI("Detach volume completed successfully."), resource=volume)
 
+    def _clone_image_volume(self, ctx, volume, image_meta):
+        volume_type_id = volume.get('volume_type_id')
+        reserve_opts = {'volumes': 1, 'gigabytes': volume.size}
+        QUOTAS.add_volume_type_opts(ctx, reserve_opts, volume_type_id)
+        reservations = QUOTAS.reserve(ctx, **reserve_opts)
+
+        try:
+            new_vol_values = {}
+            for k, v in volume.items():
+                new_vol_values[k] = v
+            del new_vol_values['id']
+            del new_vol_values['_name_id']
+            del new_vol_values['volume_type']
+            new_vol_values['volume_type_id'] = volume_type_id
+            new_vol_values['attach_status'] = 'detached'
+            new_vol_values['volume_attachment'] = []
+            new_vol_values['status'] = 'creating'
+            new_vol_values['project_id'] = ctx.project_id
+            new_vol_values['display_name'] = 'image-%s' % image_meta['id']
+            new_vol_values['source_volid'] = volume.id
+            LOG.debug('Creating image volume entry: %s.', new_vol_values)
+            image_volume = self.db.volume_create(ctx, new_vol_values)
+        except Exception:
+            QUOTAS.rollback(ctx, reservations)
+            return False
+
+        QUOTAS.commit(ctx, reservations,
+                      project_id=new_vol_values['project_id'])
+
+        try:
+            self.create_volume(ctx, image_volume.id,
+                               allow_reschedule=False)
+            image_volume = self.db.volume_get(ctx, image_volume.id)
+            if image_volume.status != 'available':
+                raise exception.InvalidVolume(_('Volume is not available.'))
+
+            self.db.volume_admin_metadata_update(ctx.elevated(),
+                                                 image_volume.id,
+                                                 {'readonly': 'True'},
+                                                 False)
+            return image_volume
+        except exception.CinderException:
+            LOG.exception(_LE('Failed to clone volume %(volume_id)s for '
+                              'image %(image_id).'),
+                          {'volume_id': volume.id,
+                           'image_id': image_meta['id']})
+            try:
+                self.delete_volume(ctx, image_volume)
+            except exception.CinderException:
+                LOG.exception(_LE('Could not delete the image volume %(id)s.'),
+                              {'id': volume.id})
+            return False
+
+    def _clone_image_volume_and_add_location(self, ctx, volume, image_service,
+                                             image_meta):
+        """Create a cloned volume and register its location to the image."""
+        if (image_meta['disk_format'] != 'raw' or
+                image_meta['container_format'] != 'bare'):
+            return False
+
+        image_volume_context = ctx
+        if self.driver.configuration.image_upload_use_internal_tenant:
+            internal_ctx = context.get_internal_tenant_context()
+            if internal_ctx:
+                image_volume_context = internal_ctx
+
+        image_volume = self._clone_image_volume(image_volume_context,
+                                                volume,
+                                                image_meta)
+        if not image_volume:
+            return False
+
+        uri = 'cinder://%s' % image_volume.id
+        image_registered = None
+        try:
+            image_registered = image_service.add_location(
+                ctx, image_meta['id'], uri, {})
+        except (exception.NotAuthorized, exception.Invalid,
+                exception.NotFound):
+            LOG.exception(_LE('Failed to register image volume location '
+                              '%(uri)s.'), {'uri': uri})
+
+        if not image_registered:
+            LOG.warning(_LW('Registration of image volume URI %(uri)s '
+                            'to image %(image_id)s failed.'),
+                        {'uri': uri, 'image_id': image_meta['id']})
+            try:
+                self.delete_volume(image_volume_context, image_volume)
+            except exception.CinderException:
+                LOG.exception(_LE('Could not delete failed image volume '
+                                  '%(id)s.'), {'id': image_volume.id})
+            return False
+
+        image_volume_meta = {'glance_image_id': image_meta['id'],
+                             'image_owner': ctx.project_id}
+        self.db.volume_metadata_update(image_volume_context,
+                                       image_volume.id,
+                                       image_volume_meta,
+                                       False)
+        return True
+
     def copy_volume_to_image(self, context, volume_id, image_meta):
         """Uploads the specified volume to Glance.
 
@@ -980,10 +1086,19 @@ class VolumeManager(manager.SchedulerDependentManager):
 
             image_service, image_id = \
                 glance.get_remote_image_service(context, image_meta['id'])
-            self.driver.copy_volume_to_image(context, volume, image_service,
-                                             image_meta)
-            LOG.debug("Uploaded volume to glance image-id: %(image_id)s.",
-                      resource=volume)
+            if (self.driver.configuration.image_upload_use_cinder_backend
+                    and self._clone_image_volume_and_add_location(
+                        context, volume, image_service, image_meta)):
+                LOG.debug("Registered image volume location to glance "
+                          "image-id: %(image_id)s.",
+                          {'image_id': image_meta['id']},
+                          resource=volume)
+            else:
+                self.driver.copy_volume_to_image(context, volume,
+                                                 image_service, image_meta)
+                LOG.debug("Uploaded volume to glance image-id: %(image_id)s.",
+                          {'image_id': image_meta['id']},
+                          resource=volume)
         except Exception as error:
             LOG.error(_LE("Upload volume to image encountered an error "
                           "(image-id: %(image_id)s)."),
@@ -1537,6 +1652,24 @@ class VolumeManager(manager.SchedulerDependentManager):
 
                 # queue it to be sent to the Schedulers.
                 self.update_service_capabilities(volume_stats)
+
+                if volume_stats.get('replication_enabled', False):
+                    # replciation_status provides a concise update of
+                    # replicating volumes and any error conditions
+                    # detected by the driver.  The intent is we don't
+                    # expect/worry about updates so long as nothing
+                    # changes, but if something goes wrong this is a
+                    # handy mechanism to update the manager and the db
+                    # possibly let the admin/user be notified
+
+                    # TODO(jdg): Refactor the check/update pieces to a
+                    # helper method we can share
+                    # We want to leverage some of the same update model
+                    # that we have in the targets update call
+
+                    replication_updates = self.driver.get_replication_updates()
+                    for update in replication_updates:
+                        pass
 
     def _append_volume_stats(self, vol_stats):
         pools = vol_stats.get('pools', None)
@@ -2706,3 +2839,204 @@ class VolumeManager(manager.SchedulerDependentManager):
                                 for key in model_update.iterkeys()}
             self.db.volume_update(ctxt.elevated(), new_volume['id'],
                                   model_update_new)
+
+    # Replication V2 methods
+    def enable_replication(self, context, volume):
+        """Enable replication on a replication capable volume.
+
+        If the volume was created on a replication_enabled host this method
+        is used to enable replication for the volume. Primarily used for
+        testing and maintenance.
+
+        :param context: security context
+        :param volume: volume object returned by DB
+        """
+
+        # NOTE(jdg): We're going to do fresh get from the DB and verify that
+        # we are in an expected state ('enabling')
+        volume = self.db.volume_get(context, volume['id'])
+        if volume['replication_status'] != 'enabling':
+            raise exception.InvalidVolume()
+
+        try:
+            rep_driver_data = self.driver.replication_enable(context,
+                                                             volume)
+        except exception.CinderException:
+            err_msg = (_("Enable replication for volume failed."))
+            LOG.exception(err_msg, resource=volume)
+            raise exception.VolumeBackendAPIException(data=err_msg)
+        try:
+            if rep_driver_data:
+                volume = self.db.volume_update(context,
+                                               volume['id'],
+                                               rep_driver_data)
+        except exception.CinderException as ex:
+            LOG.exception(_LE("Driver replication data update failed."),
+                          resource=volume)
+            raise exception.VolumeBackendAPIException(reason=ex)
+        self.db.volume_update(context, volume['id'],
+                              {'replication_status': 'enabled'})
+
+    def disable_replication(self, context, volume):
+        """Disable replication on the specified volume.
+
+        If the specified volume is currently replication enabled,
+        this method can be used to disable the replication process
+        on the backend.  This method assumes that we checked
+        replication status in the API layer to ensure we should
+        send this call to the driver.
+
+        :param context: security context
+        :param volume: volume object returned by DB
+        """
+
+        volume = self.db.volume_get(context, volume['id'])
+        if volume['replication_status'] != 'disabling':
+            raise exception.InvalidVolume()
+
+        try:
+            rep_driver_data = self.driver.replication_disable(context,
+                                                              volume)
+        except exception.CinderException:
+            err_msg = (_("Disable replication for volume failed."))
+            LOG.exception(err_msg, resource=volume)
+            raise exception.VolumeBackendAPIException(data=err_msg)
+        try:
+            if rep_driver_data:
+                volume = self.db.volume_update(context,
+                                               volume['id'],
+                                               rep_driver_data)
+        except exception.CinderException as ex:
+            LOG.exception(_LE("Driver replication data update failed."),
+                          resource=volume)
+            raise exception.VolumeBackendAPIException(reason=ex)
+        self.db.volume_update(context,
+                              volume['id'],
+                              {'replication_status': 'disabled'})
+
+    def failover_replication(self, context, volume, secondary=None):
+        """Force failover to a secondary replication target.
+
+        Forces the failover action of a replicated volume to one of its
+        secondary/target devices.  By default the choice of target devices
+        is left up to the driver.  In particular we expect one way
+        replication here, but are providing a mechanism for 'n' way
+        if supported/configrued.
+
+        Currently we leave it up to the driver to figure out how/what
+        to do here.  Rather than doing things like ID swaps, we instead
+        just let the driver figure out how/where to route things.
+
+        In cases where we might want to drop a volume-service node and
+        the replication target is a configured cinder backend, we'll
+        just update the host column for the volume.
+
+        :param context: security context
+        :param volume: volume object returned by DB
+        :param secondary: Specifies rep target to fail over to
+        """
+        try:
+            volume_updates = self.driver.replication_failover(context,
+                                                              volume,
+                                                              secondary)
+
+            # volume_updates is a dict containing a report of relevant
+            # items based on the backend and how it operates or what it needs
+            # {'host': 'secondary-configured-cinder-backend',
+            #  'model_update': {'update-all-the-provider-info-etc'},
+            #  'replication_driver_data': 'driver-specific-stuff-for-db'}
+            # Where 'host' is a valid cinder host string like
+            #  'foo@bar#baz'
+            # model_update and replication_driver_data are required
+
+        except exception.CinderException:
+
+            # FIXME(jdg): We need to create a few different exceptions here
+            # and handle each differently:
+            # 1. I couldn't failover, but the original setup is ok so proceed
+            #    as if this were never called
+            # 2. I ran into a problem and I have no idea what state things
+            #    are in, so set volume to error
+            # 3. I ran into a problem and a human needs to come fix me up
+
+            err_msg = (_("Replication failover for volume failed."))
+            LOG.exception(err_msg, resource=volume)
+            self.db.volume_update(context,
+                                  volume['id'],
+                                  {'replication_status': 'error'})
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
+        # TODO(jdg): Come back and condense thes into a single update
+        update = {}
+        model_update = volume_updates.get('model_update', None)
+        driver_update = volume_updates.get('replication_driver_data', None)
+        host_update = volume_updates.get('host', None)
+
+        if model_update:
+            update['model'] = model_update
+        if driver_update:
+            update['replication_driver_data'] = driver_update
+        if host_update:
+            update['host'] = host_update
+
+        if update:
+            try:
+                volume = self.db.volume_update(
+                    context,
+                    volume['id'],
+                    update)
+
+            except exception.CinderException as ex:
+                LOG.exception(_LE("Driver replication data update failed."),
+                              resource=volume)
+                raise exception.VolumeBackendAPIException(reason=ex)
+
+        # NOTE(jdg): We're setting replication status to failed-over
+        # which indicates the volume is ok, things went as epected but
+        # we're likely not replicating any longer because... well we
+        # did a fail-over.  In the case of admin brining primary
+        # back online he/she can use enable_replication to get this
+        # state set back to enabled.
+
+        # Also, in the case of multiple targets, the driver can update
+        # status in the rep-status checks if it still has valid replication
+        # targets that the volume is being replicated to.
+
+        self.db.volume_update(context,
+                              volume['id'],
+                              {'replication_status': 'failed-over'})
+
+    def list_replication_targets(self, context, volume):
+        """Provide a means to obtain replication targets for a volume.
+
+        This method is used to query a backend to get the current
+        replication config info for the specified volume.
+
+        In the case of a volume that isn't being replicated,
+        the driver should return an empty list.
+
+
+        Example response for replicating to a managed backend:
+            {'volume_id': volume['id'],
+             'targets':[{'managed_host': 'backend_name'}...]
+
+        Example response for replicating to an unmanaged backend:
+            {'volume_id': volume['id'], 'targets':[{'san_ip': '1.1.1.1',
+                                                    'san_login': 'admin'},
+                                                    ....]}
+
+        NOTE: It's the responsibility of the driver to mask out any
+        passwords or sensitive information.
+
+        """
+
+        try:
+            replication_targets = self.driver.list_replication_targets(context,
+                                                                       volume)
+
+        except exception.CinderException:
+            err_msg = (_("Get replication targets failed."))
+            LOG.exception(err_msg)
+            raise exception.VolumeBackendAPIException(data=err_msg)
+
+        return replication_targets
