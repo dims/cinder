@@ -324,6 +324,7 @@ class BaseVD(object):
         self._stats = {}
 
         self.pools = []
+        self.capabilities = {}
 
         # We set these mappings up in the base driver so they
         # can be used by children
@@ -339,10 +340,6 @@ class BaseVD(object):
 
         # set True by manager after successful check_for_setup
         self._initialized = False
-
-        # Copy volume data in a sparse fashion.
-        #  (overload in drivers where this is desired)
-        self._sparse_copy_volume_data = False
 
     def _is_non_recoverable(self, err, non_recoverable_list):
         for item in non_recoverable_list:
@@ -533,7 +530,179 @@ class BaseVD(object):
         For replication the following state should be reported:
         replication = True (None or false disables replication)
         """
-        return None
+        return
+
+    def get_prefixed_property(self, property):
+        """Return prefixed property name
+
+        :return a prefixed property name string or None
+        """
+
+        if property and self.capabilities.get('vendor_prefix'):
+            return self.capabilities.get('vendor_prefix') + ':' + property
+
+    def _set_property(self, properties, entry, title, description,
+                      type, **kwargs):
+        prop = dict(title=title, description=description, type=type)
+        allowed_keys = ('enum', 'default', 'minimum', 'maximum')
+        for key in kwargs:
+            if key in allowed_keys:
+                prop[key] = kwargs[key]
+        properties[entry] = prop
+
+    def _init_standard_capabilities(self):
+        """Create a dictionary of Cinder standard capabilities.
+
+        This method creates a dictionary of Cinder standard capabilities
+        and returns the created dictionary.
+        The keys of this dictionary don't contain prefix and separator(:).
+        """
+
+        properties = {}
+        self._set_property(
+            properties,
+            "thin_provisioning",
+            "Thin Provisioning",
+            _("Sets thin provisioning."),
+            "boolean")
+
+        self._set_property(
+            properties,
+            "compression",
+            "Compression",
+            _("Enables compression."),
+            "boolean")
+
+        self._set_property(
+            properties,
+            "qos",
+            "QoS",
+            _("Enables QoS."),
+            "boolean")
+
+        self._set_property(
+            properties,
+            "replication",
+            "Replication",
+            _("Enables replication."),
+            "boolean")
+
+        return properties
+
+    def _init_vendor_properties(self):
+        """Create a dictionary of vendor unique properties.
+
+        This method creates a dictionary of vendor unique properties
+        and returns both created dictionary and vendor name.
+        Returned vendor name is used to check for name of vendor
+        unique properties.
+
+        - Vendor name shouldn't include colon(:) because of the separator
+          and it is automatically replaced by underscore(_).
+          ex. abc:d -> abc_d
+        - Vendor prefix is equal to vendor name.
+          ex. abcd
+        - Vendor unique properties must start with vendor prefix + ':'.
+          ex. abcd:maxIOPS
+
+        Each backend driver needs to override this method to expose
+        its own properties using _set_property() like this:
+
+        self._set_property(
+            properties,
+            "vendorPrefix:specific_property",
+            "Title of property",
+            _("Description of property"),
+            "type")
+
+        : return dictionary of vendor unique properties
+        : return vendor name
+
+        Example of implementation::
+
+        properties = {}
+        self._set_property(
+            properties,
+            "abcd:compression_type",
+            "Compression type",
+            _("Specifies compression type."),
+            "string",
+            enum=["lossy", "lossless", "special"])
+
+        self._set_property(
+            properties,
+            "abcd:minIOPS",
+            "Minimum IOPS QoS",
+            _("Sets minimum IOPS if QoS is enabled."),
+            "integer",
+            minimum=10,
+            default=100)
+
+        return properties, 'abcd'
+        """
+
+        return {}, None
+
+    def init_capabilities(self):
+        """Obtain backend volume stats and capabilities list.
+
+        This stores a dictionary which is consisted of two parts.
+        First part includes static backend capabilities which are
+        obtained by get_volume_stats(). Second part is properties,
+        which includes parameters correspond to extra specs.
+        This properties part is consisted of cinder standard
+        capabilities and vendor unique properties.
+
+        Using this capabilities list, operator can manage/configure
+        backend using key/value from capabilities without specific
+        knowledge of backend.
+        """
+
+        # Set static backend capabilities from get_volume_stats()
+        stats = self.get_volume_stats(True)
+        if stats:
+            self.capabilities = stats.copy()
+
+        # Set cinder standard capabilities
+        self.capabilities['properties'] = self._init_standard_capabilities()
+
+        # Set Vendor unique properties
+        vendor_prop, vendor_name = self._init_vendor_properties()
+        if vendor_name and vendor_prop:
+            updated_vendor_prop = {}
+            old_name = None
+            # Replace colon in vendor name to underscore.
+            if ':' in vendor_name:
+                old_name = vendor_name
+                vendor_name = vendor_name.replace(':', '_')
+                LOG.warning(_LW('The colon in vendor name was replaced '
+                                'by underscore. Updated vendor name is '
+                                '%(name)s".'), {'name': vendor_name})
+
+            for key in vendor_prop:
+                # If key has colon in vendor name field, we replace it to
+                # underscore.
+                # ex. abc:d:storagetype:provisioning
+                #     -> abc_d:storagetype:provisioning
+                if old_name and key.startswith(old_name + ':'):
+                    new_key = key.replace(old_name, vendor_name, 1)
+                    updated_vendor_prop[new_key] = vendor_prop[key]
+                    continue
+                if not key.startswith(vendor_name + ':'):
+                    LOG.warning(_LW('Vendor unique property "%(property)s" '
+                                    'must start with vendor prefix with colon '
+                                    '"%(prefix)s". The property was '
+                                    'not registered on capabilities list.'),
+                                {'prefix': vendor_name + ':',
+                                 'property': key})
+                    continue
+                updated_vendor_prop[key] = vendor_prop[key]
+
+            # Update vendor unique properties to the dictionary
+            self.capabilities['vendor_prefix'] = vendor_name
+            self.capabilities['properties'].update(updated_vendor_prop)
+
+        LOG.debug("Initialized capabilities list: %s.", self.capabilities)
 
     def _update_pools_and_stats(self, data):
         """Updates data for pools and volume stats based on provided data."""
@@ -611,6 +780,14 @@ class BaseVD(object):
                 self._detach_volume(context, dest_attach_info, dest_vol,
                                     properties, force=True, remote=dest_remote)
 
+        # Check the backend capabilities of migration destination host.
+        rpcapi = volume_rpcapi.VolumeAPI()
+        capabilities = rpcapi.get_capabilities(context, dest_vol['host'],
+                                               False)
+        sparse_copy_volume = bool(capabilities and
+                                  capabilities.get('sparse_copy_volume',
+                                                   False))
+
         copy_error = True
         try:
             size_in_mb = int(src_vol['size']) * 1024    # vol size is in GB
@@ -620,7 +797,7 @@ class BaseVD(object):
                 size_in_mb,
                 self.configuration.volume_dd_blocksize,
                 throttle=self._throttle,
-                sparse=self._sparse_copy_volume_data)
+                sparse=sparse_copy_volume)
             copy_error = False
         except Exception:
             with excutils.save_and_reraise_exception():
@@ -1595,6 +1772,56 @@ class ReplicaV2VD(object):
 
 
 @six.add_metaclass(abc.ABCMeta)
+class ManageableSnapshotsVD(object):
+    # NOTE: Can't use abstractmethod before all drivers implement it
+    def manage_existing_snapshot(self, snapshot, existing_ref):
+        """Brings an existing backend storage object under Cinder management.
+
+        existing_ref is passed straight through from the API request's
+        manage_existing_ref value, and it is up to the driver how this should
+        be interpreted.  It should be sufficient to identify a storage object
+        that the driver should somehow associate with the newly-created cinder
+        snapshot structure.
+
+        There are two ways to do this:
+
+        1. Rename the backend storage object so that it matches the
+           snapshot['name'] which is how drivers traditionally map between a
+           cinder snapshot and the associated backend storage object.
+
+        2. Place some metadata on the snapshot, or somewhere in the backend,
+           that allows other driver requests (e.g. delete) to locate the
+           backend storage object when required.
+
+        If the existing_ref doesn't make sense, or doesn't refer to an existing
+        backend storage object, raise a ManageExistingInvalidReference
+        exception.
+        """
+        return
+
+    # NOTE: Can't use abstractmethod before all drivers implement it
+    def manage_existing_snapshot_get_size(self, snapshot, existing_ref):
+        """Return size of snapshot to be managed by manage_existing.
+
+        When calculating the size, round up to the next GB.
+        """
+        return
+
+    # NOTE: Can't use abstractmethod before all drivers implement it
+    def unmanage_snapshot(self, snapshot):
+        """Removes the specified snapshot from Cinder management.
+
+        Does not delete the underlying backend storage object.
+
+        For most drivers, this will not need to do anything. However, some
+        drivers might use this call as an opportunity to clean up any
+        Cinder-specific configuration that they have associated with the
+        backend storage object.
+        """
+        pass
+
+
+@six.add_metaclass(abc.ABCMeta)
 class ReplicaVD(object):
     @abc.abstractmethod
     def reenable_replication(self, context, volume):
@@ -1681,8 +1908,8 @@ class ReplicaVD(object):
 
 
 class VolumeDriver(ConsistencyGroupVD, TransferVD, ManageableVD, ExtendVD,
-                   CloneableVD, CloneableImageVD, SnapshotVD, ReplicaVD,
-                   LocalVD, MigrateVD, BaseVD):
+                   CloneableVD, CloneableImageVD, ManageableSnapshotsVD,
+                   SnapshotVD, ReplicaVD, LocalVD, MigrateVD, BaseVD):
     """This class will be deprecated soon.
 
     Please use the abstract classes above for new drivers.
@@ -1732,6 +1959,17 @@ class VolumeDriver(ConsistencyGroupVD, TransferVD, ManageableVD, ExtendVD,
     def unmanage(self, volume):
         msg = _("Unmanage volume not implemented.")
         raise NotImplementedError(msg)
+
+    def manage_existing_snapshot(self, snapshot, existing_ref):
+        msg = _("Manage existing snapshot not implemented.")
+        raise NotImplementedError(msg)
+
+    def manage_existing_snapshot_get_size(self, snapshot, existing_ref):
+        msg = _("Manage existing snapshot not implemented.")
+        raise NotImplementedError(msg)
+
+    def unmanage_snapshot(self, snapshot):
+        """Unmanage the specified snapshot from Cinder management."""
 
     def retype(self, context, volume, new_type, diff, host):
         return False, None

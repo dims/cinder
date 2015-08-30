@@ -16,7 +16,6 @@
 
 import errno
 import os
-import testtools
 
 import mock
 from mox3 import mox as mox_lib
@@ -851,6 +850,7 @@ class NfsDriverTestCase(test.TestCase):
         self.assertEqual(30.0, drv._stats['total_capacity_gb'])
         self.assertEqual(5.0, drv._stats['free_capacity_gb'])
         self.assertEqual(0, drv._stats['reserved_percentage'])
+        self.assertTrue(drv._stats['sparse_copy_volume'])
 
         mox.VerifyAll()
 
@@ -1140,8 +1140,8 @@ class NfsDriverDoSetupTestCase(test.TestCase):
 
         mock_os_path_exists = self.mock_object(os.path, 'exists')
 
-        with testtools.ExpectedException(exception.NfsException,
-                                         ".*no NFS config file configured.*"):
+        with self.assertRaisesRegex(exception.NfsException,
+                                    ".*no NFS config file configured.*"):
             drv.do_setup(self.context)
 
         self.assertEqual(0, mock_os_path_exists.call_count)
@@ -1154,8 +1154,8 @@ class NfsDriverDoSetupTestCase(test.TestCase):
         mock_os_path_exists = self.mock_object(os.path, 'exists')
         mock_os_path_exists.return_value = False
 
-        with testtools.ExpectedException(exception.NfsException,
-                                         "NFS config file.*doesn't exist"):
+        with self.assertRaisesRegex(exception.NfsException,
+                                    "NFS config file.*doesn't exist"):
             drv.do_setup(self.context)
 
         mock_os_path_exists.assert_has_calls(
@@ -1170,9 +1170,8 @@ class NfsDriverDoSetupTestCase(test.TestCase):
         mock_os_path_exists = self.mock_object(os.path, 'exists')
         mock_os_path_exists.return_value = True
 
-        with testtools.ExpectedException(
-                exception.InvalidConfigurationValue,
-                ".*'nfs_oversub_ratio' invalid.*"):
+        with self.assertRaisesRegex(exception.InvalidConfigurationValue,
+                                    ".*'nfs_oversub_ratio' invalid.*"):
             drv.do_setup(self.context)
 
         mock_os_path_exists.assert_has_calls(
@@ -1205,9 +1204,8 @@ class NfsDriverDoSetupTestCase(test.TestCase):
         mock_os_path_exists = self.mock_object(os.path, 'exists')
         mock_os_path_exists.return_value = True
 
-        with testtools.ExpectedException(
-                exception.InvalidConfigurationValue,
-                ".*'nfs_used_ratio' invalid.*"):
+        with self.assertRaisesRegex(exception.InvalidConfigurationValue,
+                                    ".*'nfs_used_ratio' invalid.*"):
             drv.do_setup(self.context)
 
         mock_os_path_exists.assert_has_calls(
@@ -1222,9 +1220,8 @@ class NfsDriverDoSetupTestCase(test.TestCase):
         mock_os_path_exists = self.mock_object(os.path, 'exists')
         mock_os_path_exists.return_value = True
 
-        with testtools.ExpectedException(
-                exception.InvalidConfigurationValue,
-                ".*'nfs_used_ratio' invalid.*"):
+        with self.assertRaisesRegex(exception.InvalidConfigurationValue,
+                                    ".*'nfs_used_ratio' invalid.*"):
             drv.do_setup(self.context)
 
         mock_os_path_exists.assert_has_calls(
@@ -1259,8 +1256,8 @@ class NfsDriverDoSetupTestCase(test.TestCase):
         mock_execute.side_effect = OSError(
             errno.ENOENT, 'No such file or directory.')
 
-        with testtools.ExpectedException(
-                exception.NfsException, 'mount.nfs is not installed'):
+        with self.assertRaisesRegex(exception.NfsException,
+                                    'mount.nfs is not installed'):
             drv.do_setup(self.context)
 
         mock_os_path_exists.assert_has_calls(
@@ -1284,7 +1281,7 @@ class NfsDriverDoSetupTestCase(test.TestCase):
         mock_execute.side_effect = OSError(
             errno.EPERM, 'Operation... BROKEN')
 
-        with testtools.ExpectedException(OSError, '.*Operation... BROKEN'):
+        with self.assertRaisesRegex(OSError, '.*Operation... BROKEN'):
             drv.do_setup(self.context)
 
         mock_os_path_exists.assert_has_calls(

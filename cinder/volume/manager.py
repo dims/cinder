@@ -65,11 +65,10 @@ from cinder import utils
 from cinder.volume import configuration as config
 from cinder.volume.flows.manager import create_volume
 from cinder.volume.flows.manager import manage_existing
+from cinder.volume.flows.manager import manage_existing_snapshot
 from cinder.volume import rpcapi as volume_rpcapi
 from cinder.volume import utils as vol_utils
 from cinder.volume import volume_types
-
-from eventlet import greenpool
 
 LOG = logging.getLogger(__name__)
 
@@ -189,7 +188,7 @@ def locked_snapshot_operation(f):
 class VolumeManager(manager.SchedulerDependentManager):
     """Manages attachable block storage devices."""
 
-    RPC_API_VERSION = '1.27'
+    RPC_API_VERSION = '1.29'
 
     target = messaging.Target(version=RPC_API_VERSION)
 
@@ -201,7 +200,6 @@ class VolumeManager(manager.SchedulerDependentManager):
                                             *args, **kwargs)
         self.configuration = config.Configuration(volume_manager_opts,
                                                   config_group=service_name)
-        self._tp = greenpool.GreenPool()
         self.stats = {}
 
         if not volume_driver:
@@ -234,9 +232,6 @@ class VolumeManager(manager.SchedulerDependentManager):
             with excutils.save_and_reraise_exception():
                 LOG.error(_LE("Invalid JSON: %s"),
                           self.driver.configuration.extra_capabilities)
-
-    def _add_to_threadpool(self, func, *args, **kwargs):
-        self._tp.spawn_n(func, *args, **kwargs)
 
     def _count_allocated_capacity(self, ctxt, volume):
         pool = vol_utils.extract_host(volume['host'], 'pool')
@@ -332,6 +327,9 @@ class VolumeManager(manager.SchedulerDependentManager):
             # we don't want to continue since we failed
             # to initialize the driver correctly.
             return
+
+        # Initialize backend capabilities list
+        self.driver.init_capabilities()
 
         volumes = self.db.volume_get_all_by_host(ctxt, self.host)
         self._sync_provider_info(ctxt, volumes)
@@ -565,7 +563,11 @@ class VolumeManager(manager.SchedulerDependentManager):
             raise exception.InvalidVolume(
                 reason=_("volume is not local to this node"))
 
-        is_migrating = volume_ref['migration_status'] is not None
+        # The status 'deleting' is not included, because it only applies to
+        # the source volume to be deleted after a migration. No quota
+        # needs to be handled for it.
+        is_migrating = volume_ref['migration_status'] not in (None, 'error',
+                                                              'success')
         is_migrating_dest = (is_migrating and
                              volume_ref['migration_status'].startswith(
                                  'target:'))
@@ -722,7 +724,7 @@ class VolumeManager(manager.SchedulerDependentManager):
         return snapshot.id
 
     @locked_snapshot_operation
-    def delete_snapshot(self, context, snapshot):
+    def delete_snapshot(self, context, snapshot, unmanage_only=False):
         """Deletes and unexports snapshot."""
         context = context.elevated()
         snapshot._context = context
@@ -742,7 +744,10 @@ class VolumeManager(manager.SchedulerDependentManager):
             snapshot.context = context
             snapshot.save()
 
-            self.driver.delete_snapshot(snapshot)
+            if unmanage_only:
+                self.driver.unmanage_snapshot(snapshot)
+            else:
+                self.driver.delete_snapshot(snapshot)
         except exception.SnapshotIsBusy:
             LOG.error(_LE("Delete snapshot failed, due to snapshot busy."),
                       resource=snapshot)
@@ -869,9 +874,6 @@ class VolumeManager(manager.SchedulerDependentManager):
                                              host_name_sanitized,
                                              mountpoint,
                                              mode)
-            if volume['migration_status']:
-                self.db.volume_update(context, volume_id,
-                                      {'migration_status': None})
             self._notify_about_volume_usage(context, volume, "attach.end")
             LOG.info(_LI("Attach volume completed successfully."),
                      resource=volume)
@@ -1435,13 +1437,6 @@ class VolumeManager(manager.SchedulerDependentManager):
                 self._clean_temporary_volume(ctxt, volume['id'],
                                              new_volume['id'])
 
-    def _get_original_status(self, volume):
-        attachments = volume['volume_attachment']
-        if not attachments:
-            return 'available'
-        else:
-            return 'in-use'
-
     def _clean_temporary_volume(self, ctxt, volume_id, new_volume_id,
                                 clean_db_only=False):
         volume = self.db.volume_get(ctxt, volume_id)
@@ -1502,14 +1497,15 @@ class VolumeManager(manager.SchedulerDependentManager):
         new_volume = self.db.volume_get(ctxt, new_volume_id)
         rpcapi = volume_rpcapi.VolumeAPI()
 
-        orig_volume_status = self._get_original_status(volume)
+        orig_volume_status = volume['previous_status']
 
         if error:
             LOG.info(_LI("migrate_volume_completion is cleaning up an error "
                          "for volume %(vol1)s (temporary volume %(vol2)s"),
                      {'vol1': volume['id'], 'vol2': new_volume['id']})
             rpcapi.delete_volume(ctxt, new_volume)
-            updates = {'migration_status': None, 'status': orig_volume_status}
+            updates = {'migration_status': 'error',
+                       'status': orig_volume_status}
             self.db.volume_update(ctxt, volume_id, updates)
             return volume_id
 
@@ -1537,12 +1533,9 @@ class VolumeManager(manager.SchedulerDependentManager):
         # asynchronously delete the destination id
         __, updated_new = self.db.finish_volume_migration(
             ctxt, volume_id, new_volume_id)
-        if orig_volume_status == 'in-use':
-            updates = {'migration_status': 'completing',
-                       'status': orig_volume_status}
-        else:
-            updates = {'migration_status': None}
-        self.db.volume_update(ctxt, volume_id, updates)
+        updates = {'status': orig_volume_status,
+                   'previous_status': volume['status'],
+                   'migration_status': 'success'}
 
         if orig_volume_status == 'in-use':
             attachments = volume['volume_attachment']
@@ -1552,6 +1545,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                                      attachment['attached_host'],
                                      attachment['mountpoint'],
                                      'rw')
+        self.db.volume_update(ctxt, volume_id, updates)
 
         # Asynchronous deletion of the source volume in the back-end (now
         # pointed by the target volume id)
@@ -1561,6 +1555,9 @@ class VolumeManager(manager.SchedulerDependentManager):
             LOG.error(_LE('Failed to request async delete of migration source '
                           'vol %(vol)s: %(err)s'),
                       {'vol': volume_id, 'err': ex})
+        updates = {'migration_status': 'success',
+                   'status': orig_volume_status,
+                   'previous_status': volume['status']}
 
         LOG.info(_LI("Complete-Migrate volume completed successfully."),
                  resource=volume)
@@ -1584,8 +1581,8 @@ class VolumeManager(manager.SchedulerDependentManager):
         moved = False
 
         status_update = None
-        if volume_ref['status'] == 'retyping':
-            status_update = {'status': self._get_original_status(volume_ref)}
+        if volume_ref['status'] in ('retyping', 'maintenance'):
+            status_update = {'status': volume_ref['previous_status']}
 
         self.db.volume_update(ctxt, volume_ref['id'],
                               {'migration_status': 'migrating'})
@@ -1597,7 +1594,8 @@ class VolumeManager(manager.SchedulerDependentManager):
                                                                  host)
                 if moved:
                     updates = {'host': host['host'],
-                               'migration_status': None}
+                               'migration_status': 'success',
+                               'previous_status': volume_ref['status']}
                     if status_update:
                         updates.update(status_update)
                     if model_update:
@@ -1607,7 +1605,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                                                        updates)
             except Exception:
                 with excutils.save_and_reraise_exception():
-                    updates = {'migration_status': None}
+                    updates = {'migration_status': 'error'}
                     if status_update:
                         updates.update(status_update)
                     self.db.volume_update(ctxt, volume_ref['id'], updates)
@@ -1617,7 +1615,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                                              new_type_id)
             except Exception:
                 with excutils.save_and_reraise_exception():
-                    updates = {'migration_status': None}
+                    updates = {'migration_status': 'error'}
                     if status_update:
                         updates.update(status_update)
                     self.db.volume_update(ctxt, volume_ref['id'], updates)
@@ -1667,7 +1665,8 @@ class VolumeManager(manager.SchedulerDependentManager):
                     # We want to leverage some of the same update model
                     # that we have in the targets update call
 
-                    replication_updates = self.driver.get_replication_updates()
+                    replication_updates = (
+                        self.driver.get_replication_updates(context))
                     for update in replication_updates:
                         pass
 
@@ -1827,7 +1826,7 @@ class VolumeManager(manager.SchedulerDependentManager):
         context = ctxt.elevated()
 
         volume_ref = self.db.volume_get(ctxt, volume_id)
-        status_update = {'status': self._get_original_status(volume_ref)}
+        status_update = {'status': volume_ref['previous_status']}
         if context.project_id != volume_ref['project_id']:
             project_id = volume_ref['project_id']
         else:
@@ -3040,3 +3039,33 @@ class VolumeManager(manager.SchedulerDependentManager):
             raise exception.VolumeBackendAPIException(data=err_msg)
 
         return replication_targets
+
+    def manage_existing_snapshot(self, ctxt, snapshot, ref=None):
+        LOG.debug('manage_existing_snapshot: managing %s.', ref)
+        try:
+            flow_engine = manage_existing_snapshot.get_flow(
+                ctxt,
+                self.db,
+                self.driver,
+                self.host,
+                snapshot.id,
+                ref)
+        except Exception:
+            msg = _LE("Failed to create manage_existing flow: "
+                      "%(object_type)s %(object_id)s.")
+            LOG.exception(msg, {'object_type': 'snapshot',
+                                'object_id': snapshot.id})
+            raise exception.CinderException(
+                _("Failed to create manage existing flow."))
+
+        with flow_utils.DynamicLogListener(flow_engine, logger=LOG):
+            flow_engine.run()
+        return snapshot.id
+
+    def get_capabilities(self, context, discover):
+        """Get capabilities of backend storage."""
+        if discover:
+            self.driver.init_capabilities()
+        capabilities = self.driver.capabilities
+        LOG.debug("Obtained capabilities list: %s.", capabilities)
+        return capabilities

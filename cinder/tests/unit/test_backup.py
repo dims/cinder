@@ -240,6 +240,28 @@ class BackupTestCase(BaseBackupTest):
         self.assertTrue(mock_delete_volume.called)
         self.assertTrue(mock_delete_snapshot.called)
 
+    @mock.patch('cinder.objects.backup.BackupList.get_all_by_host')
+    @mock.patch('cinder.manager.SchedulerDependentManager._add_to_threadpool')
+    def test_init_host_with_service_inithost_offload(self,
+                                                     mock_add_threadpool,
+                                                     mock_get_all_by_host):
+        self.override_config('backup_service_inithost_offload', True)
+        vol1_id = self._create_volume_db_entry()
+        db.volume_update(self.ctxt, vol1_id, {'status': 'available'})
+        backup1 = self._create_backup_db_entry(status='deleting',
+                                               volume_id=vol1_id)
+
+        vol2_id = self._create_volume_db_entry()
+        db.volume_update(self.ctxt, vol2_id, {'status': 'available'})
+        backup2 = self._create_backup_db_entry(status='deleting',
+                                               volume_id=vol2_id)
+        mock_get_all_by_host.return_value = [backup1, backup2]
+        self.backup_mgr.init_host()
+        calls = [mock.call(self.backup_mgr.delete_backup, mock.ANY, backup1),
+                 mock.call(self.backup_mgr.delete_backup, mock.ANY, backup2)]
+        mock_add_threadpool.assert_has_calls(calls, any_order=True)
+        self.assertEqual(2, mock_add_threadpool.call_count)
+
     @mock.patch.object(db, 'volume_get')
     @ddt.data(KeyError, exception.VolumeNotFound)
     def test_cleanup_temp_volumes_snapshots_volume_not_found(
@@ -759,6 +781,16 @@ class BackupTestCase(BaseBackupTest):
         result = self.backup_mgr.check_support_to_force_delete(self.ctxt)
         self.assertTrue(result)
 
+    def test_backup_has_dependent_backups(self):
+        """Test backup has dependent backups.
+
+        Test the query of has_dependent_backups in backup object is correct.
+        """
+        vol_size = 1
+        vol_id = self._create_volume_db_entry(size=vol_size)
+        backup = self._create_backup_db_entry(volume_id=vol_id)
+        self.assertFalse(backup.has_dependent_backups)
+
 
 class BackupTestCaseWithVerify(BaseBackupTest):
     """Test Case for backups."""
@@ -893,6 +925,7 @@ class BackupTestCaseWithVerify(BaseBackupTest):
         self.assertEqual('error', backup['status'])
 
 
+@ddt.ddt
 class BackupAPITestCase(BaseBackupTest):
     def setUp(self):
         super(BackupAPITestCase, self).setUp()
@@ -912,8 +945,10 @@ class BackupAPITestCase(BaseBackupTest):
             self.ctxt, self.ctxt.project_id, filters={'key': 'value'})
 
     @mock.patch.object(objects, 'BackupList')
-    def test_get_all_false_value_all_tenants(self, mock_backuplist):
-        result = self.api.get_all(self.ctxt, {'all_tenants': '0',
+    @ddt.data(False, 'false', '0', 0, 'no')
+    def test_get_all_false_value_all_tenants(
+            self, false_value, mock_backuplist):
+        result = self.api.get_all(self.ctxt, {'all_tenants': false_value,
                                               'key': 'value'})
         self.assertFalse(mock_backuplist.get_all.called)
         self.assertEqual(mock_backuplist.get_all_by_project.return_value,
@@ -922,11 +957,24 @@ class BackupAPITestCase(BaseBackupTest):
             self.ctxt, self.ctxt.project_id, filters={'key': 'value'})
 
     @mock.patch.object(objects, 'BackupList')
-    def test_get_all_true_value_all_tenants(self, mock_backuplist):
-        result = self.api.get_all(self.ctxt, {'all_tenants': 'true',
+    @ddt.data(True, 'true', '1', 1, 'yes')
+    def test_get_all_true_value_all_tenants(
+            self, true_value, mock_backuplist):
+        result = self.api.get_all(self.ctxt, {'all_tenants': true_value,
                                               'key': 'value'})
         self.assertFalse(mock_backuplist.get_all_by_project.called)
         self.assertEqual(mock_backuplist.get_all.return_value,
                          result)
         mock_backuplist.get_all.assert_called_once_with(
             self.ctxt, filters={'key': 'value'})
+
+    @mock.patch.object(objects, 'BackupList')
+    def test_get_all_true_value_all_tenants_non_admin(self, mock_backuplist):
+        ctxt = context.RequestContext('fake', 'fake')
+        result = self.api.get_all(ctxt, {'all_tenants': '1',
+                                         'key': 'value'})
+        self.assertFalse(mock_backuplist.get_all.called)
+        self.assertEqual(mock_backuplist.get_all_by_project.return_value,
+                         result)
+        mock_backuplist.get_all_by_project.assert_called_once_with(
+            ctxt, ctxt.project_id, filters={'key': 'value'})

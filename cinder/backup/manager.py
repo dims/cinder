@@ -57,7 +57,11 @@ LOG = logging.getLogger(__name__)
 backup_manager_opts = [
     cfg.StrOpt('backup_driver',
                default='cinder.backup.drivers.swift',
-               help='Driver to use for backups.',)
+               help='Driver to use for backups.',),
+    cfg.BoolOpt('backup_service_inithost_offload',
+                default=False,
+                help='Offload pending backup delete during '
+                     'backup service startup.',),
 ]
 
 # This map doesn't need to be extended in the future since it's only
@@ -233,7 +237,14 @@ class BackupManager(manager.SchedulerDependentManager):
                 backup.save()
             if backup['status'] == 'deleting':
                 LOG.info(_LI('Resuming delete on backup: %s.'), backup['id'])
-                self.delete_backup(ctxt, backup)
+                if CONF.backup_service_inithost_offload:
+                    # Offload all the pending backup delete operations to the
+                    # threadpool to prevent the main backup service thread
+                    # from being blocked.
+                    self._add_to_threadpool(self.delete_backup, ctxt, backup)
+                else:
+                    # By default, delete backups sequentially
+                    self.delete_backup(ctxt, backup)
 
         self._cleanup_temp_volumes_snapshots(backups)
 
@@ -361,6 +372,13 @@ class BackupManager(manager.SchedulerDependentManager):
         backup.size = volume['size']
         backup.availability_zone = self.az
         backup.save()
+        # Handle the num_dependent_backups of parent backup when child backup
+        # has created successfully.
+        if backup.parent_id:
+            parent_backup = objects.Backup.get_by_id(context,
+                                                     backup.parent_id)
+            parent_backup.num_dependent_backups += 1
+            parent_backup.save()
         LOG.info(_LI('Create backup finished. backup: %s.'), backup.id)
         self._notify_about_backup_usage(context, backup, "create.end")
 
@@ -513,7 +531,14 @@ class BackupManager(manager.SchedulerDependentManager):
             LOG.exception(_LE("Failed to update usages deleting backup"))
 
         backup.destroy()
-
+        # If this backup is incremental backup, handle the
+        # num_dependent_backups of parent backup
+        if backup.parent_id:
+            parent_backup = objects.Backup.get_by_id(context,
+                                                     backup.parent_id)
+            if parent_backup.has_dependent_backups:
+                parent_backup.num_dependent_backups -= 1
+                parent_backup.save()
         # Commit the reservations
         if reservations:
             QUOTAS.commit(context, reservations,

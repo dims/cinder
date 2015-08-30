@@ -88,6 +88,7 @@ def _usage_from_volume(context, volume_ref, **kw):
 
 
 def _usage_from_backup(backup_ref, **kw):
+    num_dependent_backups = backup_ref['num_dependent_backups']
     usage_info = dict(tenant_id=backup_ref['project_id'],
                       user_id=backup_ref['user_id'],
                       availability_zone=backup_ref['availability_zone'],
@@ -100,7 +101,10 @@ def _usage_from_backup(backup_ref, **kw):
                       size=backup_ref['size'],
                       service_metadata=backup_ref['service_metadata'],
                       service=backup_ref['service'],
-                      fail_reason=backup_ref['fail_reason'])
+                      fail_reason=backup_ref['fail_reason'],
+                      parent_id=backup_ref['parent_id'],
+                      num_dependent_backups=num_dependent_backups,
+                      )
 
     usage_info.update(kw)
     return usage_info
@@ -594,3 +598,29 @@ def convert_config_string_to_dict(config_string):
                     {'config_string': config_string})
 
     return resultant_dict
+
+
+def process_reserve_over_quota(context, overs, usages, quotas, size):
+    def _consumed(name):
+        return (usages[name]['reserved'] + usages[name]['in_use'])
+
+    for over in overs:
+        if 'gigabytes' in over:
+            msg = _LW("Quota exceeded for %(s_pid)s, tried to create "
+                      "%(s_size)sG snapshot (%(d_consumed)dG of "
+                      "%(d_quota)dG already consumed).")
+            LOG.warning(msg, {'s_pid': context.project_id,
+                              's_size': size,
+                              'd_consumed': _consumed(over),
+                              'd_quota': quotas[over]})
+            raise exception.VolumeSizeExceedsAvailableQuota(
+                requested=size,
+                consumed=_consumed('gigabytes'),
+                quota=quotas['gigabytes'])
+        elif 'snapshots' in over:
+            msg = _LW("Quota exceeded for %(s_pid)s, tried to create "
+                      "snapshot (%(d_consumed)d snapshots "
+                      "already consumed).")
+            LOG.warning(msg, {'s_pid': context.project_id,
+                              'd_consumed': _consumed(over)})
+            raise exception.SnapshotLimitExceeded(allowed=quotas[over])

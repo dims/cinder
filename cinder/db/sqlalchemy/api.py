@@ -551,6 +551,16 @@ def quota_get_all_by_project(context, project_id):
     return result
 
 
+@require_context
+def quota_allocated_get_all_by_project(context, project_id):
+    rows = model_query(context, models.Quota, read_deleted='no').filter_by(
+        project_id=project_id).all()
+    result = {'project_id': project_id}
+    for row in rows:
+        result[row.resource] = row.allocated
+    return result
+
+
 @require_admin_context
 def quota_create(context, project_id, resource, limit):
     quota_ref = models.Quota()
@@ -570,6 +580,15 @@ def quota_update(context, project_id, resource, limit):
     with session.begin():
         quota_ref = _quota_get(context, project_id, resource, session=session)
         quota_ref.hard_limit = limit
+        return quota_ref
+
+
+@require_admin_context
+def quota_allocated_update(context, project_id, resource, allocated):
+    session = get_session()
+    with session.begin():
+        quota_ref = _quota_get(context, project_id, resource, session=session)
+        quota_ref.allocated = allocated
         return quota_ref
 
 
@@ -1285,8 +1304,9 @@ def volume_detached(context, volume_id, attachment_id):
         if not remain_attachment:
             # Hide status update from user if we're performing volume migration
             # or uploading it to image
-            if (not volume_ref['migration_status'] and
-                    not (volume_ref['status'] == 'uploading')):
+            if ((not volume_ref['migration_status'] and
+                    not (volume_ref['status'] == 'uploading')) or
+                    volume_ref['migration_status'] in ('success', 'error')):
                 volume_ref['status'] = 'available'
 
             volume_ref['attach_status'] = 'detached'
@@ -2089,6 +2109,9 @@ def snapshot_get_all(context, filters=None, marker=None, limit=None,
                       paired with corresponding item in sort_keys
     :returns: list of matching snapshots
     """
+    if filters and not is_valid_model_filters(models.Snapshot, filters):
+        return []
+
     session = get_session()
     with session.begin():
         query = _generate_paginate_query(context, session, marker, limit,
@@ -2127,6 +2150,9 @@ def snapshot_get_all_for_volume(context, volume_id):
 
 @require_context
 def snapshot_get_by_host(context, host, filters=None):
+    if filters and not is_valid_model_filters(models.Snapshot, filters):
+        return []
+
     query = model_query(context, models.Snapshot, read_deleted='no',
                         project_only=True)
     if filters:
@@ -2169,6 +2195,9 @@ def snapshot_get_all_by_project(context, project_id, filters=None, marker=None,
                       paired with corresponding item in sort_keys
     :returns: list of matching snapshots
     """
+    if filters and not is_valid_model_filters(models.Snapshot, filters):
+        return []
+
     authorize_project_context(context, project_id)
 
     # Add project_id to filters
@@ -2406,6 +2435,10 @@ def volume_type_update(context, volume_type_id, values):
         # No description change
         if values['description'] is None:
             del values['description']
+
+        # No is_public change
+        if values['is_public'] is None:
+            del values['is_public']
 
         # No name change
         if values['name'] is None:
@@ -3399,6 +3432,9 @@ def backup_get(context, backup_id):
 
 
 def _backup_get_all(context, filters=None):
+    if filters and not is_valid_model_filters(models.Backup, filters):
+        return []
+
     session = get_session()
     with session.begin():
         # Generate the query
@@ -3765,10 +3801,10 @@ def _cgsnapshot_get_all(context, project_id=None, group_id=None, filters=None):
         query = query.filter_by(**filters)
 
     if project_id:
-        query.filter_by(project_id=project_id)
+        query = query.filter_by(project_id=project_id)
 
     if group_id:
-        query.filter_by(consistencygroup_id=group_id)
+        query = query.filter_by(consistencygroup_id=group_id)
 
     return query.all()
 
