@@ -89,10 +89,11 @@ class HP3PARFCDriver(driver.TransferVD,
         2.0.18 - Changed initialize_connection to use getHostVLUNs. #1475064
         2.0.19 - Adds consistency group support
         2.0.20 - Update driver to use ABC metaclasses
+        2.0.21 - Added update_migrated_volume. bug # 1492023
 
     """
 
-    VERSION = "2.0.20"
+    VERSION = "2.0.21"
 
     def __init__(self, *args, **kwargs):
         super(HP3PARFCDriver, self).__init__(*args, **kwargs)
@@ -122,16 +123,16 @@ class HP3PARFCDriver(driver.TransferVD,
     def get_volume_stats(self, refresh=False):
         common = self._login()
         try:
-            stats = common.get_volume_stats(
+            self._stats = common.get_volume_stats(
                 refresh,
                 self.get_filter_function(),
                 self.get_goodness_function())
-            stats['storage_protocol'] = 'FC'
-            stats['driver_version'] = self.VERSION
+            self._stats['storage_protocol'] = 'FC'
+            self._stats['driver_version'] = self.VERSION
             backend_name = self.configuration.safe_get('volume_backend_name')
-            stats['volume_backend_name'] = (backend_name or
-                                            self.__class__.__name__)
-            return stats
+            self._stats['volume_backend_name'] = (backend_name or
+                                                  self.__class__.__name__)
+            return self._stats
         finally:
             self._logout(common)
 
@@ -539,6 +540,16 @@ class HP3PARFCDriver(driver.TransferVD,
         common = self._login()
         try:
             return common.migrate_volume(volume, host)
+        finally:
+            self._logout(common)
+
+    def update_migrated_volume(self, context, volume, new_volume,
+                               original_volume_status):
+        """Update the name of the migrated volume to it's new ID."""
+        common = self._login()
+        try:
+            return common.update_migrated_volume(context, volume, new_volume,
+                                                 original_volume_status)
         finally:
             self._logout(common)
 

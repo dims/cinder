@@ -141,6 +141,13 @@ class CinderPersistentObject(object):
             self._context = original_context
 
 
+class CinderComparableObject(base.ComparableVersionedObject):
+    def __eq__(self, obj):
+        if hasattr(obj, 'obj_to_primitive'):
+            return self.obj_to_primitive() == obj.obj_to_primitive()
+        return False
+
+
 class ObjectListBase(base.ObjectListBase):
     pass
 

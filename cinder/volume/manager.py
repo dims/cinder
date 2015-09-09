@@ -47,6 +47,7 @@ from oslo_service import periodic_task
 from oslo_utils import excutils
 from oslo_utils import importutils
 from oslo_utils import timeutils
+from oslo_utils import units
 from oslo_utils import uuidutils
 from osprofiler import profiler
 import six
@@ -57,11 +58,13 @@ from cinder import context
 from cinder import exception
 from cinder import flow_utils
 from cinder.i18n import _, _LE, _LI, _LW
+from cinder.image import cache as image_cache
 from cinder.image import glance
 from cinder import manager
 from cinder import objects
 from cinder import quota
 from cinder import utils
+from cinder import volume as cinder_volume
 from cinder.volume import configuration as config
 from cinder.volume.flows.manager import create_volume
 from cinder.volume.flows.manager import manage_existing
@@ -188,7 +191,7 @@ def locked_snapshot_operation(f):
 class VolumeManager(manager.SchedulerDependentManager):
     """Manages attachable block storage devices."""
 
-    RPC_API_VERSION = '1.29'
+    RPC_API_VERSION = '1.30'
 
     target = messaging.Target(version=RPC_API_VERSION)
 
@@ -232,6 +235,30 @@ class VolumeManager(manager.SchedulerDependentManager):
             with excutils.save_and_reraise_exception():
                 LOG.error(_LE("Invalid JSON: %s"),
                           self.driver.configuration.extra_capabilities)
+
+        if self.driver.configuration.safe_get(
+                'image_volume_cache_enabled'):
+
+            max_cache_size = self.driver.configuration.safe_get(
+                'image_volume_cache_max_size_gb')
+            max_cache_entries = self.driver.configuration.safe_get(
+                'image_volume_cache_max_count')
+
+            self.image_volume_cache = image_cache.ImageVolumeCache(
+                self.db,
+                cinder_volume.API(),
+                max_cache_size,
+                max_cache_entries
+            )
+            LOG.info(_LI('Image-volume cache enabled for host %(host)s'),
+                     {'host': self.host})
+        else:
+            LOG.info(_LI('Image-volume cache disabled for host %(host)s'),
+                     {'host': self.host})
+            self.image_volume_cache = None
+
+    def _add_to_threadpool(self, func, *args, **kwargs):
+        self._tp.spawn_n(func, *args, **kwargs)
 
     def _count_allocated_capacity(self, ctxt, volume):
         pool = vol_utils.extract_host(volume['host'], 'pool')
@@ -296,7 +323,7 @@ class VolumeManager(manager.SchedulerDependentManager):
         # to be safe in what we allow and add a list of allowed keys
         # things that make sense are provider_*, replication_status etc
 
-        updates = self.driver.update_provider_info(volumes)
+        updates, snapshot_updates = self.driver.update_provider_info(volumes)
         host_vols = utils.list_of_dicts_to_dict(volumes, 'id')
 
         for u in updates or []:
@@ -308,6 +335,24 @@ class VolumeManager(manager.SchedulerDependentManager):
                 self.db.volume_update(ctxt,
                                       u['id'],
                                       update)
+
+        # NOTE(jdg): snapshots are slighty harder, because
+        # we do not have a host column and of course no get
+        # all by host, so we use a get_all and bounce our
+        # response off of it
+        if snapshot_updates:
+            cinder_snaps = self.db.snapshot_get_all(ctxt)
+            for snap in cinder_snaps:
+                # NOTE(jdg): For now we only update those that have no entry
+                if not snap.get('provider_id', None):
+                    update = (
+                        [updt for updt in snapshot_updates if updt['id'] ==
+                            snap['id']][0])
+                    if update:
+                        self.db.snapshot_update(
+                            ctxt,
+                            updt['id'],
+                            {'provider_id': updt['provider_id']})
 
     def init_host(self):
         """Perform any required initialization."""
@@ -445,6 +490,7 @@ class VolumeManager(manager.SchedulerDependentManager):
             # verified by the task itself.
             flow_engine = create_volume.get_flow(
                 context_elevated,
+                self,
                 self.db,
                 self.driver,
                 self.scheduler_rpcapi,
@@ -453,7 +499,9 @@ class VolumeManager(manager.SchedulerDependentManager):
                 allow_reschedule,
                 context,
                 request_spec,
-                filter_properties)
+                filter_properties,
+                image_volume_cache=self.image_volume_cache,
+            )
         except Exception:
             msg = _("Create manager volume flow failed.")
             LOG.exception(msg, resource={'type': 'volume', 'id': volume_id})
@@ -857,6 +905,12 @@ class VolumeManager(manager.SchedulerDependentManager):
                 # and the volume status updated.
                 utils.require_driver_initialized(self.driver)
 
+                LOG.debug('Attaching volume %(volume_id)s to instance '
+                          '%(instance)s at mountpoint %(mount)s on host '
+                          '%(host)s.',
+                          {'volume_id': volume_id, 'instance': instance_uuid,
+                           'mount': mountpoint, 'host': host_name_sanitized},
+                          resource=volume)
                 self.driver.attach_volume(context,
                                           volume,
                                           instance_uuid,
@@ -967,6 +1021,46 @@ class VolumeManager(manager.SchedulerDependentManager):
 
         self._notify_about_volume_usage(context, volume, "detach.end")
         LOG.info(_LI("Detach volume completed successfully."), resource=volume)
+
+    def _create_image_cache_volume_entry(self, ctx, volume_ref,
+                                         image_id, image_meta):
+        """Create a new image-volume and cache entry for it.
+
+        This assumes that the image has already been downloaded and stored
+        in the volume described by the volume_ref.
+        """
+        image_volume = None
+        try:
+            if not self.image_volume_cache.ensure_space(
+                    ctx,
+                    volume_ref['size'],
+                    volume_ref['host']):
+                LOG.warning(_LW('Unable to ensure space for image-volume in'
+                                ' cache. Will skip creating entry for image'
+                                ' %(image)s on host %(host)s.'),
+                            {'image': image_id, 'host': volume_ref['host']})
+                return
+
+            image_volume = self._clone_image_volume(ctx,
+                                                    volume_ref,
+                                                    image_meta)
+            if not image_volume:
+                LOG.warning(_LW('Unable to clone image_volume for image '
+                                '%(image_id) will not create cache entry.'),
+                            {'image_id': image_id})
+                return
+
+            self.image_volume_cache.create_cache_entry(
+                ctx,
+                image_volume,
+                image_id,
+                image_meta
+            )
+        except exception.CinderException as e:
+            LOG.warning(_LW('Failed to create new image-volume cache entry'
+                            ' Error: %(exception)s'), {'exception': e})
+            if image_volume:
+                self.delete_volume(ctx, image_volume.id)
 
     def _clone_image_volume(self, ctx, volume, image_meta):
         volume_type_id = volume.get('volume_type_id')
@@ -1326,6 +1420,21 @@ class VolumeManager(manager.SchedulerDependentManager):
         LOG.info(_LI("Terminate volume connection completed successfully."),
                  resource=volume_ref)
 
+    def remove_export(self, context, volume_id):
+        """Removes an export for a volume."""
+
+        utils.require_driver_initialized(self.driver)
+        volume_ref = self.db.volume_get(context, volume_id)
+        try:
+            self.driver.remove_export(context, volume_ref)
+        except Exception:
+            msg = _("Remove volume export failed.")
+            LOG.exception(msg, resource=volume_ref)
+            raise exception.VolumeBackendAPIException(data=msg)
+
+        LOG.info(_LI("Remove volume export completed successfully."),
+                 resource=volume_ref)
+
     def accept_transfer(self, context, volume_id, new_user, new_project):
         # NOTE(flaper87): Verify the driver is enabled
         # before going forward. The exception will be caught
@@ -1360,6 +1469,125 @@ class VolumeManager(manager.SchedulerDependentManager):
         LOG.info(_LI("Transfer volume completed successfully."),
                  resource=volume_ref)
         return model_update
+
+    def _connect_device(self, conn):
+        use_multipath = self.configuration.use_multipath_for_image_xfer
+        device_scan_attempts = self.configuration.num_volume_device_scan_tries
+        protocol = conn['driver_volume_type']
+        connector = utils.brick_get_connector(
+            protocol,
+            use_multipath=use_multipath,
+            device_scan_attempts=device_scan_attempts,
+            conn=conn)
+        vol_handle = connector.connect_volume(conn['data'])
+
+        root_access = True
+
+        if not connector.check_valid_device(vol_handle['path'], root_access):
+            if isinstance(vol_handle['path'], six.string_types):
+                raise exception.DeviceUnavailable(
+                    path=vol_handle['path'],
+                    reason=(_("Unable to access the backend storage via the "
+                              "path %(path)s.") %
+                            {'path': vol_handle['path']}))
+            else:
+                raise exception.DeviceUnavailable(
+                    path=None,
+                    reason=(_("Unable to access the backend storage via file "
+                              "handle.")))
+
+        return {'conn': conn, 'device': vol_handle, 'connector': connector}
+
+    def _attach_volume(self, ctxt, volume, properties, remote=False):
+        status = volume['status']
+
+        if remote:
+            rpcapi = volume_rpcapi.VolumeAPI()
+            try:
+                conn = rpcapi.initialize_connection(ctxt, volume, properties)
+            except Exception:
+                with excutils.save_and_reraise_exception():
+                    LOG.error(_LE("Failed to attach volume %(vol)s."),
+                              {'vol': volume['id']})
+                    self.db.volume_update(ctxt, volume['id'],
+                                          {'status': status})
+        else:
+            conn = self.initialize_connection(ctxt, volume['id'], properties)
+
+        return self._connect_device(conn)
+
+    def _detach_volume(self, ctxt, attach_info, volume, properties,
+                       force=False, remote=False):
+        connector = attach_info['connector']
+        connector.disconnect_volume(attach_info['conn']['data'],
+                                    attach_info['device'])
+
+        if remote:
+            rpcapi = volume_rpcapi.VolumeAPI()
+            rpcapi.terminate_connection(ctxt, volume, properties, force=force)
+            rpcapi.remove_export(ctxt, volume)
+        else:
+            try:
+                self.terminate_connection(ctxt, volume['id'], properties,
+                                          force=force)
+                self.remove_export(ctxt, volume['id'])
+            except Exception as err:
+                with excutils.save_and_reraise_exception():
+                    LOG.error(_LE('Unable to terminate volume connection: '
+                                  '%(err)s.') % {'err': err})
+
+    def _copy_volume_data(self, ctxt, src_vol, dest_vol, remote=None):
+        """Copy data from src_vol to dest_vol."""
+
+        LOG.debug('copy_data_between_volumes %(src)s -> %(dest)s.',
+                  {'src': src_vol['name'], 'dest': dest_vol['name']})
+
+        properties = utils.brick_get_connector_properties()
+
+        dest_remote = remote in ['dest', 'both']
+        dest_attach_info = self._attach_volume(ctxt, dest_vol, properties,
+                                               remote=dest_remote)
+
+        try:
+            src_remote = remote in ['src', 'both']
+            src_attach_info = self._attach_volume(ctxt, src_vol, properties,
+                                                  remote=src_remote)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                LOG.error(_LE("Failed to attach source volume for copy."))
+                self._detach_volume(ctxt, dest_attach_info, dest_vol,
+                                    properties, remote=dest_remote)
+
+        # Check the backend capabilities of migration destination host.
+        rpcapi = volume_rpcapi.VolumeAPI()
+        capabilities = rpcapi.get_capabilities(ctxt, dest_vol['host'],
+                                               False)
+        sparse_copy_volume = bool(capabilities and
+                                  capabilities.get('sparse_copy_volume',
+                                                   False))
+
+        copy_error = True
+        try:
+            size_in_mb = int(src_vol['size']) * units.Ki    # vol size is in GB
+            vol_utils.copy_volume(src_attach_info['device']['path'],
+                                  dest_attach_info['device']['path'],
+                                  size_in_mb,
+                                  self.configuration.volume_dd_blocksize,
+                                  sparse=sparse_copy_volume)
+            copy_error = False
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                LOG.error(_LE("Failed to copy volume %(src)s to %(dest)s."),
+                          {'src': src_vol['id'], 'dest': dest_vol['id']})
+        finally:
+            try:
+                self._detach_volume(ctxt, dest_attach_info, dest_vol,
+                                    properties, force=copy_error,
+                                    remote=dest_remote)
+            finally:
+                self._detach_volume(ctxt, src_attach_info, src_vol,
+                                    properties, force=copy_error,
+                                    remote=src_remote)
 
     def _migrate_volume_generic(self, ctxt, volume, host, new_type_id):
         rpcapi = volume_rpcapi.VolumeAPI()
@@ -1415,8 +1643,7 @@ class VolumeManager(manager.SchedulerDependentManager):
         try:
             attachments = volume['volume_attachment']
             if not attachments:
-                self.driver.copy_volume_data(ctxt, volume, new_volume,
-                                             remote='dest')
+                self._copy_volume_data(ctxt, volume, new_volume, remote='dest')
                 # The above call is synchronous so we complete the migration
                 self.migrate_volume_completion(ctxt, volume['id'],
                                                new_volume['id'],
@@ -2935,18 +3162,19 @@ class VolumeManager(manager.SchedulerDependentManager):
         :param secondary: Specifies rep target to fail over to
         """
         try:
-            volume_updates = self.driver.replication_failover(context,
-                                                              volume,
-                                                              secondary)
+            volume = self.db.volume_get(context, volume['id'])
+            model_update = self.driver.replication_failover(context,
+                                                            volume,
+                                                            secondary)
 
-            # volume_updates is a dict containing a report of relevant
-            # items based on the backend and how it operates or what it needs
+            # model_updates is a dict containing a report of relevant
+            # items based on the backend and how it operates or what it needs.
+            # For example:
             # {'host': 'secondary-configured-cinder-backend',
-            #  'model_update': {'update-all-the-provider-info-etc'},
+            #  'provider_location: 'foo',
             #  'replication_driver_data': 'driver-specific-stuff-for-db'}
             # Where 'host' is a valid cinder host string like
             #  'foo@bar#baz'
-            # model_update and replication_driver_data are required
 
         except exception.CinderException:
 
@@ -2965,25 +3193,12 @@ class VolumeManager(manager.SchedulerDependentManager):
                                   {'replication_status': 'error'})
             raise exception.VolumeBackendAPIException(data=err_msg)
 
-        # TODO(jdg): Come back and condense thes into a single update
-        update = {}
-        model_update = volume_updates.get('model_update', None)
-        driver_update = volume_updates.get('replication_driver_data', None)
-        host_update = volume_updates.get('host', None)
-
         if model_update:
-            update['model'] = model_update
-        if driver_update:
-            update['replication_driver_data'] = driver_update
-        if host_update:
-            update['host'] = host_update
-
-        if update:
             try:
                 volume = self.db.volume_update(
                     context,
                     volume['id'],
-                    update)
+                    model_update)
 
             except exception.CinderException as ex:
                 LOG.exception(_LE("Driver replication data update failed."),
@@ -3030,6 +3245,7 @@ class VolumeManager(manager.SchedulerDependentManager):
         """
 
         try:
+            volume = self.db.volume_get(context, volume['id'])
             replication_targets = self.driver.list_replication_targets(context,
                                                                        volume)
 

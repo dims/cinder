@@ -848,14 +848,17 @@ def reservation_expire(context):
 ###################
 
 
-def backup_get(context, backup_id):
+def backup_get(context, backup_id, read_deleted=None, project_only=True):
     """Get a backup or raise if it does not exist."""
-    return IMPL.backup_get(context, backup_id)
+    return IMPL.backup_get(context, backup_id, read_deleted, project_only)
 
 
-def backup_get_all(context, filters=None):
+def backup_get_all(context, filters=None, marker=None, limit=None,
+                   offset=None, sort_keys=None, sort_dirs=None):
     """Get all backups."""
-    return IMPL.backup_get_all(context, filters=filters)
+    return IMPL.backup_get_all(context, filters=filters, marker=marker,
+                               limit=limit, offset=offset, sort_keys=sort_keys,
+                               sort_dirs=sort_dirs)
 
 
 def backup_get_all_by_host(context, host):
@@ -868,10 +871,15 @@ def backup_create(context, values):
     return IMPL.backup_create(context, values)
 
 
-def backup_get_all_by_project(context, project_id, filters=None):
+def backup_get_all_by_project(context, project_id, filters=None, marker=None,
+                              limit=None, offset=None, sort_keys=None,
+                              sort_dirs=None):
     """Get all backups belonging to a project."""
     return IMPL.backup_get_all_by_project(context, project_id,
-                                          filters=filters)
+                                          filters=filters, marker=marker,
+                                          limit=limit, offset=offset,
+                                          sort_keys=sort_keys,
+                                          sort_dirs=sort_dirs)
 
 
 def backup_get_all_by_volume(context, volume_id, filters=None):
@@ -1024,3 +1032,39 @@ def driver_initiator_data_update(context, initiator, namespace, updates):
 def driver_initiator_data_get(context, initiator, namespace):
     """Query for an DriverPrivateData that has the specified key"""
     return IMPL.driver_initiator_data_get(context, initiator, namespace)
+
+
+###################
+
+
+def image_volume_cache_create(context, host, image_id, image_updated_at,
+                              volume_id, size):
+    """Create a new image volume cache entry."""
+    return IMPL.image_volume_cache_create(context,
+                                          host,
+                                          image_id,
+                                          image_updated_at,
+                                          volume_id,
+                                          size)
+
+
+def image_volume_cache_delete(context, volume_id):
+    """Delete an image volume cache entry specified by volume id."""
+    return IMPL.image_volume_cache_delete(context, volume_id)
+
+
+def image_volume_cache_get_and_update_last_used(context, image_id, host):
+    """Query for an image volume cache entry."""
+    return IMPL.image_volume_cache_get_and_update_last_used(context,
+                                                            image_id,
+                                                            host)
+
+
+def image_volume_cache_get_by_volume_id(context, volume_id):
+    """Query to see if a volume id is an image-volume contained in the cache"""
+    return IMPL.image_volume_cache_get_by_volume_id(context, volume_id)
+
+
+def image_volume_cache_get_all_for_host(context, host):
+    """Query for all image volume cache entry for a host."""
+    return IMPL.image_volume_cache_get_all_for_host(context, host)

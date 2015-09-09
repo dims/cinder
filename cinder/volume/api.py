@@ -34,6 +34,7 @@ from cinder.db import base
 from cinder import exception
 from cinder import flow_utils
 from cinder.i18n import _, _LE, _LI, _LW
+from cinder.image import cache as image_cache
 from cinder.image import glance
 from cinder import keymgr
 from cinder import objects
@@ -144,8 +145,8 @@ class API(base.Base):
         if refresh_cache or not enable_cache:
             topic = CONF.volume_topic
             ctxt = context.get_admin_context()
-            services = self.db.service_get_all_by_topic(ctxt, topic)
-            az_data = [(s['availability_zone'], s['disabled'])
+            services = objects.ServiceList.get_all_by_topic(ctxt, topic)
+            az_data = [(s.availability_zone, s.disabled)
                        for s in services]
             disabled_map = {}
             for (az_name, disabled) in az_data:
@@ -169,9 +170,10 @@ class API(base.Base):
                             first_type_id, second_type_id,
                             first_type=None, second_type=None):
         safe = False
-        if len(self.db.service_get_all_by_topic(context,
-                                                'cinder-volume',
-                                                disabled=True)) == 1:
+        services = objects.ServiceList.get_all_by_topic(context,
+                                                        'cinder-volume',
+                                                        disabled=True)
+        if len(services.objects) == 1:
             safe = True
         else:
             type_a = first_type or volume_types.get_volume_type(
@@ -202,6 +204,8 @@ class API(base.Base):
                scheduler_hints=None,
                source_replica=None, consistencygroup=None,
                cgsnapshot=None, multiattach=False, source_cg=None):
+
+        check_policy(context, 'create')
 
         # NOTE(jdg): we can have a create without size if we're
         # doing a create from snap or volume.  Currently
@@ -250,10 +254,10 @@ class API(base.Base):
             raise exception.InvalidInput(reason=msg)
 
         if snapshot and volume_type:
-            if volume_type['id'] != snapshot['volume_type_id']:
+            if volume_type['id'] != snapshot.volume_type_id:
                 if not self._retype_is_possible(context,
                                                 volume_type['id'],
-                                                snapshot['volume_type_id'],
+                                                snapshot.volume_type_id,
                                                 volume_type):
                     msg = _("Invalid volume_type provided: %s (requested "
                             "type is not compatible; recommend omitting "
@@ -389,6 +393,11 @@ class API(base.Base):
                     "snapshots.") % len(snapshots)
             raise exception.InvalidVolume(reason=msg)
 
+        cache = image_cache.ImageVolumeCache(self.db, self)
+        entry = cache.get_by_image_volume(context, volume_id)
+        if entry:
+            cache.evict(context, entry)
+
         # If the volume is encrypted, delete its encryption key from the key
         # manager. This operation makes volume deletion an irreversible process
         # because the volume cannot be decrypted without its key.
@@ -516,7 +525,7 @@ class API(base.Base):
         # so build the resource tag manually for now.
         LOG.info(_LI("Snapshot retrieved successfully."),
                  resource={'type': 'snapshot',
-                           'id': snapshot['id']})
+                           'id': snapshot.id})
         return snapshot
 
     def get_volume(self, context, volume_id):
@@ -933,23 +942,23 @@ class API(base.Base):
     @wrap_check_policy
     def delete_snapshot(self, context, snapshot, force=False,
                         unmanage_only=False):
-        if not force and snapshot['status'] not in ["available", "error"]:
+        if not force and snapshot.status not in ["available", "error"]:
             LOG.error(_LE('Unable to delete snapshot: %(snap_id)s, '
                           'due to invalid status. '
                           'Status must be available or '
                           'error, not %(snap_status)s.'),
-                      {'snap_id': snapshot['id'],
-                       'snap_status': snapshot['status']})
+                      {'snap_id': snapshot.id,
+                       'snap_status': snapshot.status})
             msg = _("Volume Snapshot status must be available or error.")
             raise exception.InvalidSnapshot(reason=msg)
-        cgsnapshot_id = snapshot.get('cgsnapshot_id', None)
+        cgsnapshot_id = snapshot.cgsnapshot_id
         if cgsnapshot_id:
             msg = _('Unable to delete snapshot %s because it is part of a '
-                    'consistency group.') % snapshot['id']
+                    'consistency group.') % snapshot.id
             LOG.error(msg)
             raise exception.InvalidSnapshot(reason=msg)
 
-        snapshot_obj = self.get_snapshot(context, snapshot['id'])
+        snapshot_obj = self.get_snapshot(context, snapshot.id)
         snapshot_obj.status = 'deleting'
         snapshot_obj.save()
 
@@ -1070,13 +1079,6 @@ class API(base.Base):
         return dict(rv)
 
     @wrap_check_policy
-    def delete_volume_admin_metadata(self, context, volume, key):
-        """Delete the given administration metadata item from a volume."""
-        self.db.volume_admin_metadata_delete(context, volume['id'], key)
-        LOG.info(_LI("Delete volume admin metadata completed successfully."),
-                 resource=volume)
-
-    @wrap_check_policy
     def update_volume_admin_metadata(self, context, volume, metadata,
                                      delete=False):
         """Updates or creates volume administration metadata.
@@ -1105,14 +1107,14 @@ class API(base.Base):
 
     def get_snapshot_metadata(self, context, snapshot):
         """Get all metadata associated with a snapshot."""
-        snapshot_obj = self.get_snapshot(context, snapshot['id'])
+        snapshot_obj = self.get_snapshot(context, snapshot.id)
         LOG.info(_LI("Get snapshot metadata completed successfully."),
                  resource=snapshot)
         return snapshot_obj.metadata
 
     def delete_snapshot_metadata(self, context, snapshot, key):
         """Delete the given metadata item from a snapshot."""
-        snapshot_obj = self.get_snapshot(context, snapshot['id'])
+        snapshot_obj = self.get_snapshot(context, snapshot.id)
         snapshot_obj.delete_metadata_key(context, key)
         LOG.info(_LI("Delete snapshot metadata completed successfully."),
                  resource=snapshot)
@@ -1208,7 +1210,8 @@ class API(base.Base):
 
                 pass
 
-        recv_metadata = self.image_service.create(context, metadata)
+        recv_metadata = self.image_service.create(
+            context, self.image_service._translate_to_glance(metadata))
         self.update(context, volume, {'status': 'uploading'})
         self.volume_rpcapi.copy_volume_to_image(context,
                                                 volume,
@@ -1321,13 +1324,12 @@ class API(base.Base):
         # Make sure the host is in the list of available hosts
         elevated = context.elevated()
         topic = CONF.volume_topic
-        services = self.db.service_get_all_by_topic(elevated,
-                                                    topic,
-                                                    disabled=False)
+        services = objects.ServiceList.get_all_by_topic(
+            elevated, topic, disabled=False)
         found = False
         for service in services:
             svc_host = volume_utils.extract_host(host, 'backend')
-            if utils.service_is_up(service) and service['host'] == svc_host:
+            if utils.service_is_up(service) and service.host == svc_host:
                 found = True
         if not found:
             msg = _('No available service named %s') % host
@@ -1522,7 +1524,7 @@ class API(base.Base):
             elevated = context.elevated()
             try:
                 svc_host = volume_utils.extract_host(host, 'backend')
-                service = self.db.service_get_by_host_and_topic(
+                service = objects.Service.get_by_host_and_topic(
                     elevated, svc_host, CONF.volume_topic)
             except exception.ServiceNotFound:
                 with excutils.save_and_reraise_exception():

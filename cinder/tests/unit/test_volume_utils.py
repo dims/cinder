@@ -17,7 +17,9 @@
 
 
 import datetime
+import io
 import mock
+import six
 
 from oslo_concurrency import processutils
 from oslo_config import cfg
@@ -25,10 +27,11 @@ from oslo_config import cfg
 from cinder import context
 from cinder import exception
 from cinder import test
+from cinder.tests.unit import fake_snapshot
+from cinder.tests.unit import fake_volume
 from cinder import utils
 from cinder.volume import throttling
 from cinder.volume import utils as volume_utils
-
 
 CONF = cfg.CONF
 
@@ -193,11 +196,19 @@ class NotifyUsageTestCase(test.TestCase):
             'snapshot.test_suffix',
             mock_usage.return_value)
 
-    def test_usage_from_snapshot(self):
+    @mock.patch('cinder.objects.Volume.get_by_id')
+    def test_usage_from_snapshot(self, volume_get_by_id):
+        raw_volume = {
+            'id': '55614621',
+            'availability_zone': 'nova'
+        }
+        ctxt = context.get_admin_context()
+        volume_obj = fake_volume.fake_volume_obj(ctxt, **raw_volume)
+        volume_get_by_id.return_value = volume_obj
         raw_snapshot = {
             'project_id': '12b0330ec2584a',
             'user_id': '158cba1b8c2bb6008e',
-            'volume': {'availability_zone': 'nova'},
+            'volume': volume_obj,
             'volume_id': '55614621',
             'volume_size': 1,
             'id': '343434a2',
@@ -205,9 +216,13 @@ class NotifyUsageTestCase(test.TestCase):
             'created_at': '2014-12-11T10:10:00',
             'status': 'pause',
             'deleted': '',
-            'metadata': {'fake_snap_meta_key': 'fake_snap_meta_value'},
+            'snapshot_metadata': [{'key': 'fake_snap_meta_key',
+                                   'value': 'fake_snap_meta_value'}],
+            'expected_attrs': ['metadata'],
         }
-        usage_info = volume_utils._usage_from_snapshot(raw_snapshot)
+
+        snapshot_obj = fake_snapshot.fake_snapshot_obj(ctxt, **raw_snapshot)
+        usage_info = volume_utils._usage_from_snapshot(snapshot_obj)
         expected_snapshot = {
             'tenant_id': '12b0330ec2584a',
             'user_id': '158cba1b8c2bb6008e',
@@ -216,12 +231,13 @@ class NotifyUsageTestCase(test.TestCase):
             'volume_size': 1,
             'snapshot_id': '343434a2',
             'display_name': '11',
-            'created_at': '2014-12-11T10:10:00',
+            'created_at': 'DONTCARE',
             'status': 'pause',
             'deleted': '',
-            'metadata': "{'fake_snap_meta_key': 'fake_snap_meta_value'}",
+            'metadata': six.text_type({'fake_snap_meta_key':
+                                      u'fake_snap_meta_value'}),
         }
-        self.assertEqual(expected_snapshot, usage_info)
+        self.assertDictMatch(expected_snapshot, usage_info)
 
     @mock.patch('cinder.db.volume_glance_metadata_get')
     @mock.patch('cinder.db.volume_attachment_get_used_by_volume_id')
@@ -625,6 +641,23 @@ class CopyVolumeTestCase(test.TestCase):
                                           'count=5678', 'bs=1234',
                                           'iflag=direct', 'oflag=direct',
                                           'conv=sparse', run_as_root=True)
+
+    @mock.patch('cinder.volume.utils._copy_volume_with_file')
+    def test_copy_volume_handles(self, mock_copy):
+        handle1 = io.RawIOBase()
+        handle2 = io.RawIOBase()
+        output = volume_utils.copy_volume(handle1, handle2, 1024, 1)
+        self.assertIsNone(output)
+        mock_copy.assert_called_once_with(handle1, handle2, 1024)
+
+    @mock.patch('cinder.volume.utils._transfer_data')
+    @mock.patch('cinder.volume.utils._open_volume_with_path')
+    def test_copy_volume_handle_transfer(self, mock_open, mock_transfer):
+        handle = io.RawIOBase()
+        output = volume_utils.copy_volume('/foo/bar', handle, 1024, 1)
+        self.assertIsNone(output)
+        mock_transfer.assert_called_once_with(mock.ANY, mock.ANY,
+                                              1073741824, mock.ANY)
 
 
 class VolumeUtilsTestCase(test.TestCase):

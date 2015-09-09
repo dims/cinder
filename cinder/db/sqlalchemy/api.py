@@ -42,6 +42,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import joinedload, joinedload_all
 from sqlalchemy.orm import RelationshipProperty
 from sqlalchemy.schema import Table
+from sqlalchemy.sql.expression import desc
 from sqlalchemy.sql.expression import literal_column
 from sqlalchemy.sql.expression import true
 from sqlalchemy.sql import func
@@ -3420,8 +3421,15 @@ def volume_glance_metadata_delete_by_snapshot(context, snapshot_id):
 
 
 @require_context
-def backup_get(context, backup_id):
-    result = model_query(context, models.Backup, project_only=True).\
+def backup_get(context, backup_id, read_deleted=None, project_only=True):
+    return _backup_get(context, backup_id)
+
+
+def _backup_get(context, backup_id, session=None, read_deleted=None,
+                project_only=True):
+    result = model_query(context, models.Backup, session=session,
+                         project_only=project_only,
+                         read_deleted=read_deleted).\
         filter_by(id=backup_id).\
         first()
 
@@ -3431,23 +3439,41 @@ def backup_get(context, backup_id):
     return result
 
 
-def _backup_get_all(context, filters=None):
+def _backup_get_all(context, filters=None, marker=None, limit=None,
+                    offset=None, sort_keys=None, sort_dirs=None):
     if filters and not is_valid_model_filters(models.Backup, filters):
         return []
 
     session = get_session()
     with session.begin():
-        # Generate the query
-        query = model_query(context, models.Backup)
-        if filters:
-            query = query.filter_by(**filters)
-
+        # Generate the paginate query
+        query = _generate_paginate_query(context, session, marker,
+                                         limit, sort_keys, sort_dirs, filters,
+                                         offset, models.Backup)
+        if query is None:
+            return []
         return query.all()
 
 
+def _backups_get_query(context, session=None, project_only=False):
+    return model_query(context, models.Backup, session=session,
+                       project_only=project_only)
+
+
+def _process_backups_filters(query, filters):
+    if filters:
+        # Ensure that filters' keys exist on the model
+        if not is_valid_model_filters(models.Backup, filters):
+            return
+        query = query.filter_by(**filters)
+    return query
+
+
 @require_admin_context
-def backup_get_all(context, filters=None):
-    return _backup_get_all(context, filters)
+def backup_get_all(context, filters=None, marker=None, limit=None,
+                   offset=None, sort_keys=None, sort_dirs=None):
+    return _backup_get_all(context, filters, marker, limit, offset, sort_keys,
+                           sort_dirs)
 
 
 @require_admin_context
@@ -3456,7 +3482,9 @@ def backup_get_all_by_host(context, host):
 
 
 @require_context
-def backup_get_all_by_project(context, project_id, filters=None):
+def backup_get_all_by_project(context, project_id, filters=None, marker=None,
+                              limit=None, offset=None, sort_keys=None,
+                              sort_dirs=None):
 
     authorize_project_context(context, project_id)
     if not filters:
@@ -3466,7 +3494,8 @@ def backup_get_all_by_project(context, project_id, filters=None):
 
     filters['project_id'] = project_id
 
-    return _backup_get_all(context, filters)
+    return _backup_get_all(context, filters, marker, limit, offset, sort_keys,
+                           sort_dirs)
 
 
 @require_context
@@ -3967,5 +3996,68 @@ def driver_initiator_data_get(context, initiator, namespace):
 
 PAGINATION_HELPERS = {
     models.Volume: (_volume_get_query, _process_volume_filters, _volume_get),
-    models.Snapshot: (_snaps_get_query, _process_snaps_filters, _snapshot_get)
+    models.Snapshot: (_snaps_get_query, _process_snaps_filters, _snapshot_get),
+    models.Backup: (_backups_get_query, _process_backups_filters, _backup_get)
 }
+
+
+###############################
+
+
+@require_context
+def image_volume_cache_create(context, host, image_id, image_updated_at,
+                              volume_id, size):
+    session = get_session()
+    with session.begin():
+        cache_entry = models.ImageVolumeCacheEntry()
+        cache_entry.host = host
+        cache_entry.image_id = image_id
+        cache_entry.image_updated_at = image_updated_at
+        cache_entry.volume_id = volume_id
+        cache_entry.size = size
+        session.add(cache_entry)
+        return cache_entry
+
+
+@require_context
+def image_volume_cache_delete(context, volume_id):
+    session = get_session()
+    with session.begin():
+        session.query(models.ImageVolumeCacheEntry).\
+            filter_by(volume_id=volume_id).\
+            delete()
+
+
+@require_context
+def image_volume_cache_get_and_update_last_used(context, image_id, host):
+    session = get_session()
+    with session.begin():
+        entry = session.query(models.ImageVolumeCacheEntry).\
+            filter_by(image_id=image_id).\
+            filter_by(host=host).\
+            order_by(desc(models.ImageVolumeCacheEntry.last_used)).\
+            first()
+
+        if entry:
+            entry.last_used = timeutils.utcnow()
+            entry.save(session=session)
+        return entry
+
+
+@require_context
+def image_volume_cache_get_by_volume_id(context, volume_id):
+    session = get_session()
+    with session.begin():
+        return session.query(models.ImageVolumeCacheEntry).\
+            filter_by(volume_id=volume_id).\
+            first()
+
+
+@require_context
+def image_volume_cache_get_all_for_host(context, host):
+    session = get_session()
+    with session.begin():
+        return session.query(models.ImageVolumeCacheEntry).\
+            filter_by(host=host).\
+            order_by(desc(models.ImageVolumeCacheEntry.last_used)).\
+            all()

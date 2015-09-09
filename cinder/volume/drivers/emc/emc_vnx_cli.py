@@ -536,7 +536,7 @@ class CommandLineHelper(object):
         return lun
 
     def delete_lun(self, name):
-
+        """Deletes a LUN or mount point."""
         command_delete_lun = ['lun', '-destroy',
                               '-name', name,
                               '-forceDetach',
@@ -1096,7 +1096,8 @@ class CommandLineHelper(object):
                 'raw_output': ''}
 
         command_get_storage_group = ('storagegroup', '-list',
-                                     '-gname', name)
+                                     '-gname', name, '-host',
+                                     '-iscsiAttributes')
 
         out, rc = self.command_execute(*command_get_storage_group,
                                        poll=poll)
@@ -1561,14 +1562,14 @@ class CommandLineHelper(object):
 
     def get_registered_spport_set(self, initiator_iqn, sgname, sg_raw_out):
         spport_set = set()
-        for m_spport in re.finditer(r'\n\s+%s\s+SP\s(A|B)\s+(\d+)' %
-                                    initiator_iqn,
-                                    sg_raw_out,
-                                    flags=re.IGNORECASE):
-            spport_set.add((m_spport.group(1), int(m_spport.group(2))))
-            LOG.debug('See path %(path)s in %(sg)s',
-                      {'path': m_spport.group(0),
-                       'sg': sgname})
+        for m_spport in re.finditer(
+                r'\n\s+%s\s+SP\s.*\n.*\n\s*SPPort:\s+(A|B)-(\d+)v(\d+)\s*\n'
+                % initiator_iqn, sg_raw_out, flags=re.IGNORECASE):
+            spport_set.add((m_spport.group(1), int(m_spport.group(2)),
+                           int(m_spport.group(3))))
+        LOG.debug('See path %(path)s in %(sg)s.',
+                  {'path': spport_set,
+                   'sg': sgname})
         return spport_set
 
     def ping_node(self, target_portal, initiator_ip):
@@ -1620,7 +1621,9 @@ class CommandLineHelper(object):
             sp_portals = all_iscsi_targets[target_sp]
             random.shuffle(sp_portals)
             for portal in sp_portals:
-                spport = (portal['SP'], portal['Port ID'])
+                spport = (portal['SP'],
+                          portal['Port ID'],
+                          portal['Virtual Port ID'])
                 if spport not in registered_spport_set:
                     LOG.debug(
                         "Skip SP Port %(port)s since "
@@ -1784,6 +1787,7 @@ class EMCVnxCliBase(object):
     tmp_snap_prefix = 'tmp-snap-'
     snap_as_vol_prefix = 'snap-as-vol-'
     tmp_cgsnap_prefix = 'tmp-cgsnapshot-'
+    tmp_smp_for_backup_prefix = 'tmp-smp-'
 
     def __init__(self, prtcl, configuration=None):
         self.protocol = prtcl
@@ -1903,14 +1907,16 @@ class EMCVnxCliBase(object):
             raise exception.VolumeBackendAPIException(data=msg)
         return valid_ports
 
-    def _validate_iscsi_port(self, sp, port_id, vlan_id, cmd_output):
-        """Validates whether the iSCSI port is existed on VNX"""
-        iscsi_pattern = ('SP:\s+' + sp.upper() +
-                         '\nPort ID:\s+' + str(port_id) +
-                         '\nPort WWN:\s+.*' +
-                         '\niSCSI Alias:\s+.*\n'
-                         '\nVirtual Port ID:\s+' + str(vlan_id))
-        return re.search(iscsi_pattern, cmd_output)
+    def _validate_iscsi_port(self, sp, port_id, vport_id, cmd_output):
+        """Validates whether the iSCSI port is existed on VNX."""
+        sp_port_pattern = (r'SP:\s+%(sp)s\nPort ID:\s+%(port_id)s\n' %
+                           {'sp': sp.upper(), 'port_id': port_id})
+        sp_port_fields = re.split(sp_port_pattern, cmd_output)
+        if len(sp_port_fields) < 2:
+            return False
+        sp_port_info = re.split('SP:\s+(A|B)', sp_port_fields[1])[0]
+        vport_pattern = '\nVirtual Port ID:\s+%s\nVLAN ID:' % vport_id
+        return re.search(vport_pattern, sp_port_info) is not None
 
     def _validate_fc_port(self, sp, port_id, cmd_output):
         """Validates whether the FC port is existed on VNX"""
@@ -1961,6 +1967,9 @@ class EMCVnxCliBase(object):
     def _construct_tmp_snap_name(self, volume):
         return self.tmp_snap_prefix + volume['id']
 
+    def _construct_tmp_smp_name(self, snapshot):
+        return self.tmp_smp_for_backup_prefix + snapshot.id
+
     def create_volume(self, volume):
         """Creates a EMC volume."""
         volume_size = volume['size']
@@ -1996,7 +2005,7 @@ class EMCVnxCliBase(object):
             provisioning, tiering, volume['consistencygroup_id'],
             ignore_thresholds=self.ignore_pool_full_threshold,
             poll=False)
-        pl = self._build_provider_location_for_lun(data['lun_id'])
+        pl = self._build_provider_location(data['lun_id'])
         volume_metadata['lun_type'] = 'lun'
         model_update = {'provider_location': pl,
                         'metadata': volume_metadata}
@@ -2100,13 +2109,13 @@ class EMCVnxCliBase(object):
             raise exception.VolumeBackendAPIException(data=msg)
         return
 
-    def delete_volume(self, volume):
+    def delete_volume(self, volume, force_delete=False):
         """Deletes an EMC volume."""
         try:
             self._client.delete_lun(volume['name'])
         except exception.EMCVnxCLICmdError as ex:
             orig_out = "\n".join(ex.kwargs["out"])
-            if (self.force_delete_lun_in_sg and
+            if ((force_delete or self.force_delete_lun_in_sg) and
                     VNXError.has_error(orig_out, VNXError.LUN_IN_SG)):
                 LOG.warning(_LW('LUN corresponding to %s is still '
                                 'in some Storage Groups.'
@@ -2254,14 +2263,15 @@ class EMCVnxCliBase(object):
             self._client.delete_snapshot(
                 self._construct_snap_as_vol_name(volume))
 
-        pl = self._build_provider_location_for_lun(src_id, 'lun')
+        pl = self._build_provider_location(src_id, 'lun')
         volume_metadata = self._get_volume_metadata(volume)
         volume_metadata['lun_type'] = 'lun'
         model_update = {'provider_location': pl,
                         'metadata': volume_metadata}
         return moved, model_update
 
-    def update_migrated_volume(self, context, volume, new_volume):
+    def update_migrated_volume(self, context, volume, new_volume,
+                               original_volume_status):
         lun_type = self._extract_provider_location_for_lun(
             new_volume['provider_location'], 'type')
         volume_metadata = self._get_volume_metadata(volume)
@@ -2519,7 +2529,7 @@ class EMCVnxCliBase(object):
                                                 store=store_spec)
             flow_engine.run()
             new_lun_id = flow_engine.storage.fetch('new_lun_id')
-            pl = self._build_provider_location_for_lun(new_lun_id, 'lun')
+            pl = self._build_provider_location(new_lun_id, 'lun')
             volume_metadata['lun_type'] = 'lun'
         else:
             work_flow.add(CopySnapshotTask(),
@@ -2530,7 +2540,7 @@ class EMCVnxCliBase(object):
                                                 store=store_spec)
             flow_engine.run()
             new_lun_id = flow_engine.storage.fetch('new_smp_id')
-            pl = self._build_provider_location_for_lun(new_lun_id, 'smp')
+            pl = self._build_provider_location(new_lun_id, 'smp')
             volume_metadata['lun_type'] = 'smp'
         model_update = {'provider_location': pl,
                         'metadata': volume_metadata}
@@ -2594,7 +2604,7 @@ class EMCVnxCliBase(object):
                 self._client.delete_cgsnapshot(snapshot['id'])
             else:
                 self.delete_snapshot(snapshot)
-            pl = self._build_provider_location_for_lun(new_lun_id, 'lun')
+            pl = self._build_provider_location(new_lun_id, 'lun')
             volume_metadata['lun_type'] = 'lun'
         else:
             work_flow.add(CreateSnapshotTask(),
@@ -2604,7 +2614,7 @@ class EMCVnxCliBase(object):
                                                 store=store_spec)
             flow_engine.run()
             new_lun_id = flow_engine.storage.fetch('new_smp_id')
-            pl = self._build_provider_location_for_lun(new_lun_id, 'smp')
+            pl = self._build_provider_location(new_lun_id, 'smp')
             volume_metadata['lun_type'] = 'smp'
 
         model_update = {'provider_location': pl,
@@ -2627,7 +2637,8 @@ class EMCVnxCliBase(object):
     def dumps_provider_location(self, pl_dict):
         return '|'.join([k + '^' + pl_dict[k] for k in pl_dict])
 
-    def _build_provider_location_for_lun(self, lun_id, type='lun'):
+    def _build_provider_location(self, lun_id, type='lun'):
+        """Builds provider_location for volume or snapshot."""
         pl_dict = {'system': self.get_array_serial(),
                    'type': type,
                    'id': six.text_type(lun_id),
@@ -2884,13 +2895,13 @@ class EMCVnxCliBase(object):
                               ip, host, vport_id=None):
         gname = host
         if vport_id is not None:
-            cmd_iscsi_setpath = ('storagegroup', '-gname', gname, '-setpath',
+            cmd_iscsi_setpath = ('storagegroup', '-setpath', '-gname', gname,
                                  '-hbauid', initiator_uid, '-sp', sp,
                                  '-spport', port_id, '-spvport', vport_id,
                                  '-ip', ip, '-host', host, '-o')
             out, rc = self._client.command_execute(*cmd_iscsi_setpath)
         else:
-            cmd_fc_setpath = ('storagegroup', '-gname', gname, '-setpath',
+            cmd_fc_setpath = ('storagegroup', '-setpath', '-gname', gname,
                               '-hbauid', initiator_uid, '-sp', sp,
                               '-spport', port_id,
                               '-ip', ip, '-host', host, '-o')
@@ -2917,7 +2928,9 @@ class EMCVnxCliBase(object):
                 # Normalize io_ports
                 for sp in ('A', 'B'):
                     new_ports = filter(
-                        lambda pt: (pt['SP'], pt['Port ID']) not in sp_ports,
+                        lambda pt: (pt['SP'], pt['Port ID'],
+                                    pt['Virtual Port ID'])
+                        not in sp_ports,
                         self.iscsi_targets[sp])
                     new_white[sp] = map(lambda white:
                                         {'SP': white['SP'],
@@ -3324,6 +3337,34 @@ class EMCVnxCliBase(object):
             return conn_info
         return do_terminate_connection()
 
+    def initialize_connection_snapshot(self, snapshot, connector, **kwargs):
+        """Initializes connection for mount point."""
+        smp_name = self._construct_tmp_smp_name(snapshot)
+        self._client.attach_mount_point(smp_name, snapshot.name)
+        volume = {'name': smp_name, 'id': snapshot.id}
+        return self.initialize_connection(volume, connector)
+
+    def terminate_connection_snapshot(self, snapshot, connector, **kwargs):
+        """Disallows connection for mount point."""
+        smp_name = self._construct_tmp_smp_name(snapshot)
+        volume = {'name': smp_name}
+        conn_info = self.terminate_connection(volume, connector)
+        self._client.detach_mount_point(smp_name)
+        return conn_info
+
+    def create_export_snapshot(self, context, snapshot, connector):
+        """Creates mount point for a snapshot."""
+        smp_name = self._construct_tmp_smp_name(snapshot)
+        primary_lun_name = snapshot.volume_name
+        self._client.create_mount_point(primary_lun_name, smp_name)
+        return None
+
+    def remove_export_snapshot(self, context, snapshot):
+        """Removes mount point for a snapshot."""
+        smp_name = self._construct_tmp_smp_name(snapshot)
+        volume = {'name': smp_name, 'provider_location': None}
+        self.delete_volume(volume, True)
+
     def manage_existing_get_size(self, volume, existing_ref):
         """Returns size of volume to be managed by manage_existing."""
         if 'source-id' in existing_ref:
@@ -3371,7 +3412,7 @@ class EMCVnxCliBase(object):
                 existing_ref=manage_existing_ref, reason=reason)
         self._client.rename_lun(lun_id, volume['name'])
         model_update = {'provider_location':
-                        self._build_provider_location_for_lun(lun_id)}
+                        self._build_provider_location(lun_id)}
         return model_update
 
     def get_login_ports(self, connector, io_ports=None):
@@ -3508,7 +3549,7 @@ class EMCVnxCliBase(object):
         for i, update in enumerate(volume_model_updates):
             new_lun_id = flow_engine.storage.fetch(lun_id_key_template % i)
             update['provider_location'] = (
-                self._build_provider_location_for_lun(new_lun_id))
+                self._build_provider_location(new_lun_id))
 
         return None, volume_model_updates
 

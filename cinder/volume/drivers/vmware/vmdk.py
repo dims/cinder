@@ -486,7 +486,10 @@ class VMwareEsxVmdkDriver(driver.VolumeDriver):
         hosts = []
         if clusters:
             for cluster in clusters:
-                hosts.extend(self.volumeops.get_cluster_hosts(cluster))
+                cluster_hosts = self.volumeops.get_cluster_hosts(cluster)
+                for host in cluster_hosts:
+                    if self.volumeops.is_host_usable(host):
+                        hosts.append(host)
         return hosts
 
     def _select_datastore(self, req, host=None):
@@ -1945,17 +1948,22 @@ class VMwareVcVmdkDriver(VMwareEsxVmdkDriver):
         # Check if the current datastore is visible to the host managing
         # the instance and compliant with the storage profile.
         datastore = self.volumeops.get_datastore(backing)
-        backing_profile = self.volumeops.get_profile(backing)
+        backing_profile = None
+        if self._storage_policy_enabled:
+            backing_profile = self.volumeops.get_profile(backing)
         if (self.volumeops.is_datastore_accessible(datastore, host) and
                 self.ds_sel.is_datastore_compliant(datastore,
                                                    backing_profile)):
             LOG.debug("Datastore: %(datastore)s of backing: %(backing)s is "
-                      "already accessible to instance's host: %(host)s and "
-                      "compliant with storage profile: %(profile)s.",
+                      "already accessible to instance's host: %(host)s.",
                       {'backing': backing,
                        'datastore': datastore,
-                       'host': host,
-                       'profile': backing_profile})
+                       'host': host})
+            if backing_profile:
+                LOG.debug("Backing: %(backing)s is compliant with "
+                          "storage profile: %(profile)s.",
+                          {'backing': backing,
+                           'profile': backing_profile})
             return
 
         # We need to relocate the backing to an accessible and profile

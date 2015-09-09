@@ -30,6 +30,7 @@ from cinder import context
 from cinder import db
 from cinder import exception
 from cinder.i18n import _
+from cinder import objects
 from cinder import test
 from cinder.tests.unit.api import fakes
 from cinder.tests.unit import utils
@@ -156,13 +157,13 @@ class BackupsAPITestCase(test.TestCase):
 
         self.assertEqual(200, res.status_int)
         self.assertEqual(3, len(res_dict['backups'][0]))
-        self.assertEqual(backup_id1, res_dict['backups'][0]['id'])
+        self.assertEqual(backup_id3, res_dict['backups'][0]['id'])
         self.assertEqual('test_backup', res_dict['backups'][0]['name'])
         self.assertEqual(3, len(res_dict['backups'][1]))
         self.assertEqual(backup_id2, res_dict['backups'][1]['id'])
         self.assertEqual('test_backup', res_dict['backups'][1]['name'])
         self.assertEqual(3, len(res_dict['backups'][2]))
-        self.assertEqual(backup_id3, res_dict['backups'][2]['id'])
+        self.assertEqual(backup_id1, res_dict['backups'][2]['id'])
         self.assertEqual('test_backup', res_dict['backups'][2]['name'])
 
         db.backup_destroy(context.get_admin_context(), backup_id3)
@@ -185,14 +186,84 @@ class BackupsAPITestCase(test.TestCase):
         backup_list = dom.getElementsByTagName('backup')
 
         self.assertEqual(2, backup_list.item(0).attributes.length)
-        self.assertEqual(backup_id1,
+        self.assertEqual(backup_id3,
                          backup_list.item(0).getAttribute('id'))
         self.assertEqual(2, backup_list.item(1).attributes.length)
         self.assertEqual(backup_id2,
                          backup_list.item(1).getAttribute('id'))
         self.assertEqual(2, backup_list.item(2).attributes.length)
-        self.assertEqual(backup_id3,
+        self.assertEqual(backup_id1,
                          backup_list.item(2).getAttribute('id'))
+
+        db.backup_destroy(context.get_admin_context(), backup_id3)
+        db.backup_destroy(context.get_admin_context(), backup_id2)
+        db.backup_destroy(context.get_admin_context(), backup_id1)
+
+    def test_list_backups_with_limit(self):
+        backup_id1 = self._create_backup()
+        backup_id2 = self._create_backup()
+        backup_id3 = self._create_backup()
+
+        req = webob.Request.blank('/v2/fake/backups?limit=2')
+        req.method = 'GET'
+        req.headers['Content-Type'] = 'application/json'
+        res = req.get_response(fakes.wsgi_app())
+        res_dict = json.loads(res.body)
+
+        self.assertEqual(200, res.status_int)
+        self.assertEqual(2, len(res_dict['backups']))
+        self.assertEqual(3, len(res_dict['backups'][0]))
+        self.assertEqual(backup_id3, res_dict['backups'][0]['id'])
+        self.assertEqual('test_backup', res_dict['backups'][0]['name'])
+        self.assertEqual(3, len(res_dict['backups'][1]))
+        self.assertEqual(backup_id2, res_dict['backups'][1]['id'])
+        self.assertEqual('test_backup', res_dict['backups'][1]['name'])
+
+        db.backup_destroy(context.get_admin_context(), backup_id3)
+        db.backup_destroy(context.get_admin_context(), backup_id2)
+        db.backup_destroy(context.get_admin_context(), backup_id1)
+
+    def test_list_backups_with_marker(self):
+        backup_id1 = self._create_backup()
+        backup_id2 = self._create_backup()
+        backup_id3 = self._create_backup()
+        url = ('/v2/fake/backups?marker=%s' % backup_id3)
+        req = webob.Request.blank(url)
+        req.method = 'GET'
+        req.headers['Content-Type'] = 'application/json'
+        res = req.get_response(fakes.wsgi_app())
+        res_dict = json.loads(res.body)
+
+        self.assertEqual(200, res.status_int)
+        self.assertEqual(2, len(res_dict['backups']))
+        self.assertEqual(3, len(res_dict['backups'][0]))
+        self.assertEqual(backup_id2, res_dict['backups'][0]['id'])
+        self.assertEqual('test_backup', res_dict['backups'][0]['name'])
+        self.assertEqual(3, len(res_dict['backups'][1]))
+        self.assertEqual(backup_id1, res_dict['backups'][1]['id'])
+        self.assertEqual('test_backup', res_dict['backups'][1]['name'])
+
+        db.backup_destroy(context.get_admin_context(), backup_id3)
+        db.backup_destroy(context.get_admin_context(), backup_id2)
+        db.backup_destroy(context.get_admin_context(), backup_id1)
+
+    def test_list_backups_with_limit_and_marker(self):
+        backup_id1 = self._create_backup()
+        backup_id2 = self._create_backup()
+        backup_id3 = self._create_backup()
+
+        url = ('/v2/fake/backups?limit=1&marker=%s' % backup_id3)
+        req = webob.Request.blank(url)
+        req.method = 'GET'
+        req.headers['Content-Type'] = 'application/json'
+        res = req.get_response(fakes.wsgi_app())
+        res_dict = json.loads(res.body)
+
+        self.assertEqual(200, res.status_int)
+        self.assertEqual(1, len(res_dict['backups']))
+        self.assertEqual(3, len(res_dict['backups'][0]))
+        self.assertEqual(backup_id2, res_dict['backups'][0]['id'])
+        self.assertEqual('test_backup', res_dict['backups'][0]['name'])
 
         db.backup_destroy(context.get_admin_context(), backup_id3)
         db.backup_destroy(context.get_admin_context(), backup_id2)
@@ -219,7 +290,7 @@ class BackupsAPITestCase(test.TestCase):
                          res_dict['backups'][0]['description'])
         self.assertEqual('test_backup',
                          res_dict['backups'][0]['name'])
-        self.assertEqual(backup_id1, res_dict['backups'][0]['id'])
+        self.assertEqual(backup_id3, res_dict['backups'][0]['id'])
         self.assertEqual(0, res_dict['backups'][0]['object_count'])
         self.assertEqual(0, res_dict['backups'][0]['size'])
         self.assertEqual('creating', res_dict['backups'][0]['status'])
@@ -241,13 +312,12 @@ class BackupsAPITestCase(test.TestCase):
 
         self.assertEqual(14, len(res_dict['backups'][2]))
         self.assertEqual('az1', res_dict['backups'][2]['availability_zone'])
-        self.assertEqual('volumebackups',
-                         res_dict['backups'][2]['container'])
+        self.assertEqual('volumebackups', res_dict['backups'][2]['container'])
         self.assertEqual('this is a test backup',
                          res_dict['backups'][2]['description'])
         self.assertEqual('test_backup',
                          res_dict['backups'][2]['name'])
-        self.assertEqual(backup_id3, res_dict['backups'][2]['id'])
+        self.assertEqual(backup_id1, res_dict['backups'][2]['id'])
         self.assertEqual(0, res_dict['backups'][2]['object_count'])
         self.assertEqual(0, res_dict['backups'][2]['size'])
         self.assertEqual('creating', res_dict['backups'][2]['status'])
@@ -325,7 +395,7 @@ class BackupsAPITestCase(test.TestCase):
         self.assertEqual(
             'test_backup', backup_detail.item(0).getAttribute('name'))
         self.assertEqual(
-            backup_id1, backup_detail.item(0).getAttribute('id'))
+            backup_id3, backup_detail.item(0).getAttribute('id'))
         self.assertEqual(
             0, int(backup_detail.item(0).getAttribute('object_count')))
         self.assertEqual(
@@ -367,7 +437,7 @@ class BackupsAPITestCase(test.TestCase):
         self.assertEqual(
             'test_backup', backup_detail.item(2).getAttribute('name'))
         self.assertEqual(
-            backup_id3, backup_detail.item(2).getAttribute('id'))
+            backup_id1, backup_detail.item(2).getAttribute('id'))
         self.assertEqual(
             0, int(backup_detail.item(2).getAttribute('object_count')))
         self.assertEqual(
@@ -376,6 +446,73 @@ class BackupsAPITestCase(test.TestCase):
             'creating', backup_detail.item(2).getAttribute('status'))
         self.assertEqual(
             1, int(backup_detail.item(2).getAttribute('volume_id')))
+
+        db.backup_destroy(context.get_admin_context(), backup_id3)
+        db.backup_destroy(context.get_admin_context(), backup_id2)
+        db.backup_destroy(context.get_admin_context(), backup_id1)
+
+    def test_list_backups_detail_with_limit_and_sort_args(self):
+        backup_id1 = self._create_backup()
+        backup_id2 = self._create_backup()
+        backup_id3 = self._create_backup()
+        url = ('/v2/fake/backups/detail?limit=2&sort_key=created_at'
+               '&sort_dir=desc')
+        req = webob.Request.blank(url)
+        req.method = 'GET'
+        req.headers['Content-Type'] = 'application/json'
+        res = req.get_response(fakes.wsgi_app())
+        res_dict = json.loads(res.body)
+
+        self.assertEqual(200, res.status_int)
+        self.assertEqual(2, len(res_dict['backups']))
+        self.assertEqual(14, len(res_dict['backups'][0]))
+        self.assertEqual(backup_id3, res_dict['backups'][0]['id'])
+        self.assertEqual(14, len(res_dict['backups'][1]))
+        self.assertEqual(backup_id2, res_dict['backups'][1]['id'])
+
+        db.backup_destroy(context.get_admin_context(), backup_id3)
+        db.backup_destroy(context.get_admin_context(), backup_id2)
+        db.backup_destroy(context.get_admin_context(), backup_id1)
+
+    def test_list_backups_detail_with_marker(self):
+        backup_id1 = self._create_backup()
+        backup_id2 = self._create_backup()
+        backup_id3 = self._create_backup()
+
+        url = ('/v2/fake/backups/detail?marker=%s' % backup_id3)
+        req = webob.Request.blank(url)
+        req.method = 'GET'
+        req.headers['Content-Type'] = 'application/json'
+        res = req.get_response(fakes.wsgi_app())
+        res_dict = json.loads(res.body)
+
+        self.assertEqual(200, res.status_int)
+        self.assertEqual(2, len(res_dict['backups']))
+        self.assertEqual(14, len(res_dict['backups'][0]))
+        self.assertEqual(backup_id2, res_dict['backups'][0]['id'])
+        self.assertEqual(14, len(res_dict['backups'][1]))
+        self.assertEqual(backup_id1, res_dict['backups'][1]['id'])
+
+        db.backup_destroy(context.get_admin_context(), backup_id3)
+        db.backup_destroy(context.get_admin_context(), backup_id2)
+        db.backup_destroy(context.get_admin_context(), backup_id1)
+
+    def test_list_backups_detail_with_limit_and_marker(self):
+        backup_id1 = self._create_backup()
+        backup_id2 = self._create_backup()
+        backup_id3 = self._create_backup()
+
+        url = ('/v2/fake/backups/detail?limit=1&marker=%s' % backup_id3)
+        req = webob.Request.blank(url)
+        req.method = 'GET'
+        req.headers['Content-Type'] = 'application/json'
+        res = req.get_response(fakes.wsgi_app())
+        res_dict = json.loads(res.body)
+
+        self.assertEqual(200, res.status_int)
+        self.assertEqual(1, len(res_dict['backups']))
+        self.assertEqual(14, len(res_dict['backups'][0]))
+        self.assertEqual(backup_id2, res_dict['backups'][0]['id'])
 
         db.backup_destroy(context.get_admin_context(), backup_id3)
         db.backup_destroy(context.get_admin_context(), backup_id2)
@@ -1463,20 +1600,15 @@ class BackupsAPITestCase(test.TestCase):
     def test_import_record_volume_id_specified_json(self,
                                                     _mock_import_record_rpc,
                                                     _mock_list_services):
-        ctx = context.RequestContext('admin', 'fake', is_admin=True)
+        utils.replace_obj_loader(self, objects.Backup)
+        project_id = 'fake'
         backup_service = 'fake'
-        backup_url = 'fake'
-        _mock_import_record_rpc.return_value = \
-            {'display_name': 'fake',
-             'display_description': 'fake',
-             'container': 'fake',
-             'size': 1,
-             'service_metadata': 'fake',
-             'service': 'fake',
-             'object_count': 1,
-             'status': 'available',
-             'availability_zone': 'fake'}
-        _mock_list_services.return_value = ['fake']
+        ctx = context.RequestContext('admin', project_id, is_admin=True)
+        backup = objects.Backup(ctx, id='id', user_id='user_id',
+                                project_id=project_id, status='available')
+        backup_url = backup.encode_record()
+        _mock_import_record_rpc.return_value = None
+        _mock_list_services.return_value = [backup_service]
 
         req = webob.Request.blank('/v2/fake/backups/import_record')
         body = {'backup-record': {'backup_service': backup_service,
@@ -1487,29 +1619,77 @@ class BackupsAPITestCase(test.TestCase):
 
         res = req.get_response(fakes.wsgi_app(fake_auth_context=ctx))
         res_dict = json.loads(res.body)
+
         # verify that request is successful
         self.assertEqual(201, res.status_int)
-        self.assertTrue('id' in res_dict['backup'])
+        self.assertIn('id', res_dict['backup'])
+        self.assertEqual('id', res_dict['backup']['id'])
+
+        # Verify that entry in DB is as expected
+        db_backup = objects.Backup.get_by_id(ctx, 'id')
+        self.assertEqual(ctx.project_id, db_backup.project_id)
+        self.assertEqual(ctx.user_id, db_backup.user_id)
+        self.assertEqual('0000-0000-0000-0000', db_backup.volume_id)
+        self.assertEqual('creating', db_backup.status)
+
+    @mock.patch('cinder.backup.api.API._list_backup_services')
+    @mock.patch('cinder.backup.rpcapi.BackupAPI.import_record')
+    def test_import_record_volume_id_exists_deleted(self,
+                                                    _mock_import_record_rpc,
+                                                    _mock_list_services):
+        ctx = context.RequestContext('admin', 'fake', is_admin=True)
+        utils.replace_obj_loader(self, objects.Backup)
+
+        # Original backup belonged to a different user_id and project_id
+        backup = objects.Backup(ctx, id='id', user_id='original_user_id',
+                                project_id='original_project_id',
+                                status='available')
+        backup_url = backup.encode_record()
+
+        # Deleted DB entry has project_id and user_id set to fake
+        backup_id = self._create_backup('id', status='deleted')
+        backup_service = 'fake'
+        _mock_import_record_rpc.return_value = None
+        _mock_list_services.return_value = [backup_service]
+
+        req = webob.Request.blank('/v2/fake/backups/import_record')
+        body = {'backup-record': {'backup_service': backup_service,
+                                  'backup_url': backup_url}}
+        req.body = json.dumps(body)
+        req.method = 'POST'
+        req.headers['content-type'] = 'application/json'
+
+        res = req.get_response(fakes.wsgi_app(fake_auth_context=ctx))
+        res_dict = json.loads(res.body)
+
+        # verify that request is successful
+        self.assertEqual(201, res.status_int)
+        self.assertIn('id', res_dict['backup'])
+        self.assertEqual('id', res_dict['backup']['id'])
+
+        # Verify that entry in DB is as expected, with new project and user_id
+        db_backup = objects.Backup.get_by_id(ctx, 'id')
+        self.assertEqual(ctx.project_id, db_backup.project_id)
+        self.assertEqual(ctx.user_id, db_backup.user_id)
+        self.assertEqual('0000-0000-0000-0000', db_backup.volume_id)
+        self.assertEqual('creating', db_backup.status)
+
+        db.backup_destroy(context.get_admin_context(), backup_id)
 
     @mock.patch('cinder.backup.api.API._list_backup_services')
     @mock.patch('cinder.backup.rpcapi.BackupAPI.import_record')
     def test_import_record_volume_id_specified_xml(self,
                                                    _mock_import_record_rpc,
                                                    _mock_list_services):
-        ctx = context.RequestContext('admin', 'fake', is_admin=True)
+        utils.replace_obj_loader(self, objects.Backup)
+        project_id = 'fake'
         backup_service = 'fake'
-        backup_url = 'fake'
-        _mock_import_record_rpc.return_value = \
-            {'display_name': 'fake',
-             'display_description': 'fake',
-             'container': 'fake',
-             'size': 1,
-             'service_metadata': 'fake',
-             'service': 'fake',
-             'object_count': 1,
-             'status': 'available',
-             'availability_zone': 'fake'}
-        _mock_list_services.return_value = ['fake']
+        ctx = context.RequestContext('admin', project_id, is_admin=True)
+        backup = objects.Backup(ctx, id='id', user_id='user_id',
+                                project_id=project_id, status='available')
+        backup_url = backup.encode_record()
+        _mock_import_record_rpc.return_value = None
+        _mock_list_services.return_value = [backup_service]
 
         req = webob.Request.blank('/v2/fake/backups/import_record')
         req.body = ('<backup-record backup_service="%(backup_service)s" '
@@ -1522,10 +1702,20 @@ class BackupsAPITestCase(test.TestCase):
         req.headers['Accept'] = 'application/xml'
         res = req.get_response(fakes.wsgi_app(fake_auth_context=ctx))
 
+        # verify that request is successful
         self.assertEqual(201, res.status_int)
+
+        # Verify that entry in DB is as expected
+        db_backup = objects.Backup.get_by_id(ctx, 'id')
+        self.assertEqual(ctx.project_id, db_backup.project_id)
+        self.assertEqual(ctx.user_id, db_backup.user_id)
+        self.assertEqual('0000-0000-0000-0000', db_backup.volume_id)
+        self.assertEqual('creating', db_backup.status)
+
+        # Verify the response
         dom = minidom.parseString(res.body)
-        backup = dom.getElementsByTagName('backup')
-        self.assertTrue(backup.item(0).hasAttribute('id'))
+        back = dom.getElementsByTagName('backup')
+        self.assertEqual(backup.id, back.item(0).attributes['id'].value)
 
     @mock.patch('cinder.backup.api.API._list_backup_services')
     def test_import_record_with_no_backup_services(self,
@@ -1551,13 +1741,60 @@ class BackupsAPITestCase(test.TestCase):
                          res_dict['computeFault']['message'])
 
     @mock.patch('cinder.backup.api.API._list_backup_services')
+    def test_import_backup_with_wrong_backup_url(self, _mock_list_services):
+        ctx = context.RequestContext('admin', 'fake', is_admin=True)
+        backup_service = 'fake'
+        backup_url = 'fake'
+        _mock_list_services.return_value = ['no-match1', 'no-match2']
+        req = webob.Request.blank('/v2/fake/backups/import_record')
+        body = {'backup-record': {'backup_service': backup_service,
+                                  'backup_url': backup_url}}
+        req.body = json.dumps(body)
+        req.method = 'POST'
+        req.headers['content-type'] = 'application/json'
+
+        res = req.get_response(fakes.wsgi_app(fake_auth_context=ctx))
+        res_dict = json.loads(res.body)
+        self.assertEqual(400, res.status_int)
+        self.assertEqual(400, res_dict['badRequest']['code'])
+        self.assertEqual("Invalid input received: Can't parse backup record.",
+                         res_dict['badRequest']['message'])
+
+    @mock.patch('cinder.backup.api.API._list_backup_services')
+    def test_import_backup_with_existing_backup_record(self,
+                                                       _mock_list_services):
+        ctx = context.RequestContext('admin', 'fake', is_admin=True)
+        backup_id = self._create_backup('1')
+        backup_service = 'fake'
+        backup = objects.Backup.get_by_id(ctx, backup_id)
+        backup_url = backup.encode_record()
+        _mock_list_services.return_value = ['no-match1', 'no-match2']
+        req = webob.Request.blank('/v2/fake/backups/import_record')
+        body = {'backup-record': {'backup_service': backup_service,
+                                  'backup_url': backup_url}}
+        req.body = json.dumps(body)
+        req.method = 'POST'
+        req.headers['content-type'] = 'application/json'
+
+        res = req.get_response(fakes.wsgi_app(fake_auth_context=ctx))
+        res_dict = json.loads(res.body)
+        self.assertEqual(400, res.status_int)
+        self.assertEqual(400, res_dict['badRequest']['code'])
+        self.assertEqual('Invalid backup: Backup already exists in database.',
+                         res_dict['badRequest']['message'])
+
+        db.backup_destroy(context.get_admin_context(), backup_id)
+
+    @mock.patch('cinder.backup.api.API._list_backup_services')
     @mock.patch('cinder.backup.rpcapi.BackupAPI.import_record')
     def test_import_backup_with_missing_backup_services(self,
                                                         _mock_import_record,
                                                         _mock_list_services):
         ctx = context.RequestContext('admin', 'fake', is_admin=True)
+        backup_id = self._create_backup('1', status='deleted')
         backup_service = 'fake'
-        backup_url = 'fake'
+        backup = objects.Backup.get_by_id(ctx, backup_id)
+        backup_url = backup.encode_record()
         _mock_list_services.return_value = ['no-match1', 'no-match2']
         _mock_import_record.side_effect = \
             exception.ServiceNotFound(service_id='fake')
@@ -1572,9 +1809,10 @@ class BackupsAPITestCase(test.TestCase):
         res_dict = json.loads(res.body)
         self.assertEqual(500, res.status_int)
         self.assertEqual(500, res_dict['computeFault']['code'])
-        self.assertEqual('Service %s could not be found.'
-                         % backup_service,
+        self.assertEqual('Service %s could not be found.' % backup_service,
                          res_dict['computeFault']['message'])
+
+        db.backup_destroy(context.get_admin_context(), backup_id)
 
     def test_import_record_with_missing_body_elements(self):
         ctx = context.RequestContext('admin', 'fake', is_admin=True)

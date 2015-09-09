@@ -11,7 +11,6 @@
     "volume:delete_volume_metadata": "",
     "volume:update_volume_metadata": "",
     "volume:get_volume_admin_metadata": "rule:admin_api",
-    "volume:delete_volume_admin_metadata": "rule:admin_api",
     "volume:update_volume_admin_metadata": "rule:admin_api",
     "volume:delete": "",
     "volume:update": "",
@@ -70,6 +69,7 @@
     "volume_extension:services:update" : "rule:admin_api",
     "volume_extension:volume_manage": "rule:admin_api",
     "volume_extension:volume_unmanage": "rule:admin_api",
+    "volume_extension:capabilities": "rule:admin_api",
 
     "limits_extension:used_limits": "",
 

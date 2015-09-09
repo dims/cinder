@@ -141,12 +141,12 @@ class ExtractVolumeRequestTask(flow_utils.CinderTask):
         """
 
         def validate_snap_size(size):
-            if snapshot and size < snapshot['volume_size']:
+            if snapshot and size < snapshot.volume_size:
                 msg = _("Volume size '%(size)s'GB cannot be smaller than"
                         " the snapshot size %(snap_size)sGB. "
                         "They must be >= original snapshot size.")
                 msg = msg % {'size': size,
-                             'snap_size': snapshot['volume_size']}
+                             'snap_size': snapshot.volume_size}
                 raise exception.InvalidInput(reason=msg)
 
         def validate_source_size(size):
@@ -176,7 +176,7 @@ class ExtractVolumeRequestTask(flow_utils.CinderTask):
         if not size and source_volume:
             size = source_volume['size']
         elif not size and snapshot:
-            size = snapshot['volume_size']
+            size = snapshot.volume_size
 
         size = utils.as_int(size)
         LOG.debug("Validating volume '%(size)s' using %(functors)s" %
@@ -277,9 +277,20 @@ class ExtractVolumeRequestTask(flow_utils.CinderTask):
                 availability_zone = CONF.storage_availability_zone
 
         if availability_zone not in self.availability_zones:
-            msg = _("Availability zone '%s' is invalid") % (availability_zone)
-            LOG.warning(msg)
-            raise exception.InvalidInput(reason=msg)
+            if CONF.allow_availability_zone_fallback:
+                original_az = availability_zone
+                availability_zone = (
+                    CONF.default_availability_zone or
+                    CONF.storage_availability_zone)
+                LOG.warning(_LW("Availability zone '%(s_az)s' "
+                                "not found, falling back to "
+                                "'%(s_fallback_az)s'."),
+                            {'s_az': original_az,
+                             's_fallback_az': availability_zone})
+            else:
+                msg = _("Availability zone '%(s_az)s' is invalid.")
+                msg = msg % {'s_az': availability_zone}
+                raise exception.InvalidInput(reason=msg)
 
         # If the configuration only allows cloning to the same availability
         # zone then we need to enforce that.

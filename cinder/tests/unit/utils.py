@@ -14,9 +14,12 @@
 #
 
 import socket
+import sys
+import uuid
 
 from oslo_service import loopingcall
 from oslo_utils import timeutils
+import oslo_versionedobjects
 
 from cinder import context
 from cinder import db
@@ -88,18 +91,20 @@ def create_snapshot(ctxt,
                     display_name='test_snapshot',
                     display_description='this is a test snapshot',
                     cgsnapshot_id = None,
-                    status='creating'):
+                    status='creating',
+                    **kwargs):
     vol = db.volume_get(ctxt, volume_id)
-    snap = {}
-    snap['volume_id'] = volume_id
-    snap['user_id'] = ctxt.user_id
-    snap['project_id'] = ctxt.project_id
-    snap['status'] = status
-    snap['volume_size'] = vol['size']
-    snap['display_name'] = display_name
-    snap['display_description'] = display_description
-    snap['cgsnapshot_id'] = cgsnapshot_id
-    return db.snapshot_create(ctxt, snap)
+    snap = objects.Snapshot(ctxt)
+    snap.volume_id = volume_id
+    snap.user_id = ctxt.user_id or 'fake_user_id'
+    snap.project_id = ctxt.project_id or 'fake_project_id'
+    snap.status = status
+    snap.volume_size = vol['size']
+    snap.display_name = display_name
+    snap.display_description = display_description
+    snap.cgsnapshot_id = cgsnapshot_id
+    snap.create()
+    return snap
 
 
 def create_consistencygroup(ctxt,
@@ -184,3 +189,47 @@ class ZeroIntervalLoopingCall(loopingcall.FixedIntervalLoopingCall):
     def start(self, interval, **kwargs):
         kwargs['initial_delay'] = 0
         return super(ZeroIntervalLoopingCall, self).start(0, **kwargs)
+
+
+def replace_obj_loader(testcase, obj):
+    def fake_obj_load_attr(self, name):
+        # This will raise KeyError for non existing fields as expected
+        field = self.fields[name]
+
+        if field.default != oslo_versionedobjects.fields.UnspecifiedDefault:
+            value = field.default
+        elif field.nullable:
+            value = None
+        elif isinstance(field, oslo_versionedobjects.fields.StringField):
+            value = ''
+        elif isinstance(field, oslo_versionedobjects.fields.IntegerField):
+            value = 1
+        elif isinstance(field, oslo_versionedobjects.fields.UUIDField):
+            value = uuid.uuid4()
+        setattr(self, name, value)
+
+    testcase.addCleanup(setattr, obj, 'obj_load_attr', obj.obj_load_attr)
+    obj.obj_load_attr = fake_obj_load_attr
+
+
+file_spec = None
+
+
+def get_file_spec():
+    """Return a Python 2 and 3 compatible version of a 'file' spec.
+
+    This is to be used anywhere that you need to do something such as
+    mock.MagicMock(spec=file) to mock out something with the file attributes.
+
+    Due to the 'file' built-in method being removed in Python 3 we need to do
+    some special handling for it.
+    """
+    global file_spec
+    # set on first use
+    if file_spec is None:
+        if sys.version_info[0] == 3:
+            import _io
+            file_spec = list(set(dir(_io.TextIOWrapper)).union(
+                set(dir(_io.BytesIO))))
+        else:
+            file_spec = file

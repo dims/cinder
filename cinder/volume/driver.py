@@ -48,10 +48,6 @@ volume_opts = [
                default=0,
                min=0, max=100,
                help='The percentage of backend capacity is reserved'),
-    cfg.IntOpt('iscsi_num_targets',
-               default=None,
-               help='This option is deprecated and unused. '
-                    'It will be removed in the Liberty release.'),
     cfg.StrOpt('iscsi_target_prefix',
                default='iqn.2010-10.org.openstack:',
                help='Prefix for iSCSI volumes'),
@@ -249,6 +245,17 @@ volume_opts = [
                      'upload-to-image will be placed in the internal tenant. '
                      'Otherwise, the image volume is created in the current '
                      'context\'s tenant.'),
+    cfg.BoolOpt('image_volume_cache_enabled',
+                default=False,
+                help='Enable the image volume cache for this backend.'),
+    cfg.IntOpt('image_volume_cache_max_size_gb',
+               default=0,
+               help='Max size of the image volume cache for this backend in '
+                    'GB. 0 => unlimited.'),
+    cfg.IntOpt('image_volume_cache_max_count',
+               default=0,
+               help='Max number of entries allowed in the image volume cache. '
+                    '0 => unlimited.'),
 ]
 
 # for backward compatibility
@@ -257,10 +264,6 @@ iser_opts = [
                default=3,
                help='The maximum number of times to rescan iSER target'
                     'to find volume'),
-    cfg.IntOpt('iser_num_targets',
-               default=None,
-               help='This option is deprecated and unused. '
-                    'It will be removed in the Liberty release.'),
     cfg.StrOpt('iser_target_prefix',
                default='iqn.2010-10.org.openstack:',
                help='Prefix for iSER volumes'),
@@ -1389,9 +1392,12 @@ class BaseVD(object):
         """Get provider info updates from driver.
 
         :param volumes: List of Cinder volumes to check for updates
-        :return: dict of update {'id': uuid, provider_id: <provider-id>}
+        :return: tuple (volume_updates, snapshot_updates)
+
+        where volume updates {'id': uuid, provider_id: <provider-id>}
+        and snapshot updates {'id': uuid, provider_id: <provider-id>}
         """
-        return None
+        return None, None
 
 
 @six.add_metaclass(abc.ABCMeta)
