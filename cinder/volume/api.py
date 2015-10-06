@@ -16,7 +16,7 @@
 
 """Handles all requests relating to volumes."""
 
-
+import ast
 import collections
 import datetime
 import functools
@@ -52,12 +52,13 @@ from cinder.volume import utils as volume_utils
 from cinder.volume import volume_types
 
 
-allow_force_upload = cfg.BoolOpt('enable_force_upload',
-                                 default=False,
-                                 help='Enables the Force option on '
-                                      'upload_to_image. This enables '
-                                      'running upload_volume on in-use '
-                                      'volumes for backends that support it.')
+allow_force_upload_opt = cfg.BoolOpt('enable_force_upload',
+                                     default=False,
+                                     help='Enables the Force option on '
+                                          'upload_to_image. This enables '
+                                          'running upload_volume on in-use '
+                                          'volumes for backends that '
+                                          'support it.')
 volume_host_opt = cfg.BoolOpt('snapshot_same_host',
                               default=True,
                               help='Create volume from snapshot at the host '
@@ -73,7 +74,7 @@ az_cache_time_opt = cfg.IntOpt('az_cache_duration',
                                     'seconds')
 
 CONF = cfg.CONF
-CONF.register_opt(allow_force_upload)
+CONF.register_opt(allow_force_upload_opt)
 CONF.register_opt(volume_host_opt)
 CONF.register_opt(volume_same_az_opt)
 CONF.register_opt(az_cache_time_opt)
@@ -170,20 +171,21 @@ class API(base.Base):
                             first_type_id, second_type_id,
                             first_type=None, second_type=None):
         safe = False
-        services = objects.ServiceList.get_all_by_topic(context,
+        elevated = context.elevated()
+        services = objects.ServiceList.get_all_by_topic(elevated,
                                                         'cinder-volume',
                                                         disabled=True)
         if len(services.objects) == 1:
             safe = True
         else:
             type_a = first_type or volume_types.get_volume_type(
-                context,
+                elevated,
                 first_type_id)
             type_b = second_type or volume_types.get_volume_type(
-                context,
+                elevated,
                 second_type_id)
-            if(volume_utils.matching_backend_name(type_a['extra_specs'],
-                                                  type_b['extra_specs'])):
+            if (volume_utils.matching_backend_name(type_a['extra_specs'],
+                                                   type_b['extra_specs'])):
                 safe = True
         return safe
 
@@ -234,6 +236,11 @@ class API(base.Base):
                         "type must be supported by this consistency "
                         "group).") % volume_type
                 raise exception.InvalidInput(reason=msg)
+
+        if volume_type and 'extra_specs' not in volume_type:
+            extra_specs = volume_types.get_volume_type_extra_specs(
+                volume_type['id'])
+            volume_type['extra_specs'] = extra_specs
 
         if source_volume and volume_type:
             if volume_type['id'] != source_volume['volume_type_id']:
@@ -446,26 +453,6 @@ class API(base.Base):
         LOG.info(_LI("Volume info retrieved successfully."), resource=rv)
         return volume
 
-    def _get_all_tenants_value(self, filters):
-        """Returns a Boolean for the value of filters['all_tenants'].
-
-           False is returned if 'all_tenants' is not in the filters dictionary.
-           An InvalidInput exception is thrown for invalid values.
-        """
-
-        b = False
-        if 'all_tenants' in filters:
-            val = six.text_type(filters['all_tenants']).lower()
-            if val in ['true', '1']:
-                b = True
-            elif val in ['false', '0']:
-                b = False
-            else:
-                msg = _('all_tenants param must be 0 or 1')
-                raise exception.InvalidInput(reason=msg)
-
-        return b
-
     def get_all(self, context, marker=None, limit=None, sort_keys=None,
                 sort_dirs=None, filters=None, viewable_admin_meta=False,
                 offset=None):
@@ -474,7 +461,7 @@ class API(base.Base):
         if filters is None:
             filters = {}
 
-        allTenants = self._get_all_tenants_value(filters)
+        allTenants = utils.get_bool_param('all_tenants', filters)
 
         try:
             if limit is not None:
@@ -811,7 +798,7 @@ class API(base.Base):
         except Exception:
             with excutils.save_and_reraise_exception():
                 try:
-                    if hasattr(snapshot, 'id'):
+                    if snapshot.obj_attr_is_set('id'):
                         snapshot.destroy()
                 finally:
                     QUOTAS.rollback(context, reservations)
@@ -1360,7 +1347,8 @@ class API(base.Base):
         volume_type = {}
         volume_type_id = volume['volume_type_id']
         if volume_type_id:
-            volume_type = volume_types.get_volume_type(context, volume_type_id)
+            volume_type = volume_types.get_volume_type(context.elevated(),
+                                                       volume_type_id)
         request_spec = {'volume_properties': volume,
                         'volume_type': volume_type,
                         'volume_id': volume['id']}
@@ -1447,10 +1435,11 @@ class API(base.Base):
         # Support specifying volume type by ID or name
         try:
             if uuidutils.is_uuid_like(new_type):
-                vol_type = volume_types.get_volume_type(context, new_type)
+                vol_type = volume_types.get_volume_type(context.elevated(),
+                                                        new_type)
             else:
-                vol_type = volume_types.get_volume_type_by_name(context,
-                                                                new_type)
+                vol_type = volume_types.get_volume_type_by_name(
+                    context.elevated(), new_type)
         except exception.InvalidVolumeType:
             msg = _('Invalid volume_type passed: %s.') % new_type
             LOG.error(msg)
@@ -1520,6 +1509,10 @@ class API(base.Base):
     def manage_existing(self, context, host, ref, name=None, description=None,
                         volume_type=None, metadata=None,
                         availability_zone=None, bootable=False):
+        if volume_type and 'extra_specs' not in volume_type:
+            extra_specs = volume_types.get_volume_type_extra_specs(
+                volume_type['id'])
+            volume_type['extra_specs'] = extra_specs
         if availability_zone is None:
             elevated = context.elevated()
             try:
@@ -1698,6 +1691,17 @@ class API(base.Base):
         # also, would be worth having something at a backend/host
         # level to show an admin how a backend is configured.
         return self.volume_rpcapi.list_replication_targets(ctxt, volume)
+
+    def check_volume_filters(self, filters):
+        booleans = self.db.get_booleans_for_table('volume')
+        for k, v in filters.iteritems():
+            try:
+                if k in booleans:
+                    filters[k] = bool(v)
+                else:
+                    filters[k] = ast.literal_eval(v)
+            except (ValueError, SyntaxError):
+                LOG.debug('Could not evaluate value %s, assuming string', v)
 
 
 class HostAPI(base.Base):

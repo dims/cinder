@@ -63,7 +63,8 @@ class ExtractVolumeRequestTask(flow_utils.CinderTask):
     default_provides = set(['availability_zone', 'size', 'snapshot_id',
                             'source_volid', 'volume_type', 'volume_type_id',
                             'encryption_key_id', 'source_replicaid',
-                            'consistencygroup_id', 'cgsnapshot_id'])
+                            'consistencygroup_id', 'cgsnapshot_id',
+                            'qos_specs'])
 
     def __init__(self, image_service, availability_zones, **kwargs):
         super(ExtractVolumeRequestTask, self).__init__(addons=[ACTION],
@@ -206,7 +207,7 @@ class ExtractVolumeRequestTask(flow_utils.CinderTask):
 
         # Check image size is not larger than volume size.
         image_size = utils.as_int(image_meta['size'], quiet=False)
-        image_size_in_gb = (image_size + GB - 1) / GB
+        image_size_in_gb = (image_size + GB - 1) // GB
         if image_size_in_gb > size:
             msg = _('Size of specified image %(image_size)sGB'
                     ' is larger than volume size %(volume_size)sGB.')
@@ -409,7 +410,8 @@ class ExtractVolumeRequestTask(flow_utils.CinderTask):
         specs = {}
         if volume_type_id:
             qos_specs = volume_types.get_volume_type_qos_specs(volume_type_id)
-            specs = qos_specs['qos_specs']
+            if qos_specs['qos_specs']:
+                specs = qos_specs['qos_specs'].get('specs', {})
         if not specs:
             # to make sure we don't pass empty dict
             specs = None
@@ -444,7 +446,7 @@ class EntryCreateTask(flow_utils.CinderTask):
                     'name', 'reservations', 'size', 'snapshot_id',
                     'source_volid', 'volume_type_id', 'encryption_key_id',
                     'source_replicaid', 'consistencygroup_id',
-                    'cgsnapshot_id', 'multiattach']
+                    'cgsnapshot_id', 'multiattach', 'qos_specs']
         super(EntryCreateTask, self).__init__(addons=[ACTION],
                                               requires=requires)
         self.db = db

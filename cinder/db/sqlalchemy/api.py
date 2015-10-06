@@ -46,6 +46,7 @@ from sqlalchemy.sql.expression import desc
 from sqlalchemy.sql.expression import literal_column
 from sqlalchemy.sql.expression import true
 from sqlalchemy.sql import func
+from sqlalchemy.sql import sqltypes
 
 from cinder.api import common
 from cinder.common import sqlalchemyutils
@@ -1104,6 +1105,18 @@ def volume_create(context, values):
     return _volume_get(context, values['id'], session=session)
 
 
+def get_booleans_for_table(table_name):
+    booleans = set()
+    table = getattr(models, table_name.capitalize())
+    if hasattr(table, '__table__'):
+        columns = table.__table__.columns
+        for column in columns:
+            if isinstance(column.type, sqltypes.Boolean):
+                booleans.add(column.name)
+
+    return booleans
+
+
 @require_admin_context
 def volume_data_get_for_host(context, host, count_only=False):
     host_attr = models.Volume.host
@@ -2159,9 +2172,23 @@ def snapshot_get_by_host(context, host, filters=None):
     if filters:
         query = query.filter_by(**filters)
 
-    return query.join(models.Snapshot.volume).filter(
-        models.Volume.host == host).options(
-            joinedload('snapshot_metadata')).all()
+    # As a side effect of the introduction of pool-aware scheduler,
+    # newly created volumes will have pool information appended to
+    # 'host' field of a volume record. So a volume record in DB can
+    # now be either form below:
+    #     Host
+    #     Host#Pool
+    if host and isinstance(host, six.string_types):
+        session = get_session()
+        with session.begin():
+            host_attr = getattr(models.Volume, 'host')
+            conditions = [host_attr == host,
+                          host_attr.op('LIKE')(host + '#%')]
+            query = query.join(models.Snapshot.volume).filter(
+                or_(*conditions)).options(joinedload('snapshot_metadata'))
+            return query.all()
+    elif not host:
+        return []
 
 
 @require_context
@@ -2756,10 +2783,12 @@ def volume_type_access_remove(context, type_id, project_id):
     """Remove given tenant from the volume type access list."""
     volume_type_id = _volume_type_get_id_from_volume_type(context, type_id)
 
-    count = _volume_type_access_query(context).\
-        filter_by(volume_type_id=volume_type_id).\
-        filter_by(project_id=project_id).\
-        soft_delete(synchronize_session=False)
+    count = (_volume_type_access_query(context).
+             filter_by(volume_type_id=volume_type_id).
+             filter_by(project_id=project_id).
+             update({'deleted': True,
+                     'deleted_at': timeutils.utcnow(),
+                     'updated_at': literal_column('updated_at')}))
     if count == 0:
         raise exception.VolumeTypeAccessNotFound(
             volume_type_id=type_id, project_id=project_id)
@@ -3166,8 +3195,8 @@ def volume_type_encryption_update(context, volume_type_id, values):
                                                 session)
 
         if not encryption:
-            raise exception.VolumeTypeEncryptionNotFound(type_id=
-                                                         volume_type_id)
+            raise exception.VolumeTypeEncryptionNotFound(
+                type_id=volume_type_id)
 
         encryption.update(values)
 

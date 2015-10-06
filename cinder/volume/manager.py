@@ -250,10 +250,10 @@ class VolumeManager(manager.SchedulerDependentManager):
                 max_cache_size,
                 max_cache_entries
             )
-            LOG.info(_LI('Image-volume cache enabled for host %(host)s'),
+            LOG.info(_LI('Image-volume cache enabled for host %(host)s.'),
                      {'host': self.host})
         else:
-            LOG.info(_LI('Image-volume cache disabled for host %(host)s'),
+            LOG.info(_LI('Image-volume cache disabled for host %(host)s.'),
                      {'host': self.host})
             self.image_volume_cache = None
 
@@ -317,13 +317,14 @@ class VolumeManager(manager.SchedulerDependentManager):
             LOG.info(_LI("Determined volume DB was not empty at startup."))
             return False
 
-    def _sync_provider_info(self, ctxt, volumes):
+    def _sync_provider_info(self, ctxt, volumes, snapshots):
         # NOTE(jdg): For now this just updates provider_id, we can add more
         # add more items to the update if theyr'e releveant but we need
         # to be safe in what we allow and add a list of allowed keys
         # things that make sense are provider_*, replication_status etc
 
-        updates, snapshot_updates = self.driver.update_provider_info(volumes)
+        updates, snapshot_updates = self.driver.update_provider_info(
+            volumes, snapshots)
         host_vols = utils.list_of_dicts_to_dict(volumes, 'id')
 
         for u in updates or []:
@@ -377,7 +378,8 @@ class VolumeManager(manager.SchedulerDependentManager):
         self.driver.init_capabilities()
 
         volumes = self.db.volume_get_all_by_host(ctxt, self.host)
-        self._sync_provider_info(ctxt, volumes)
+        snapshots = self.db.snapshot_get_by_host(ctxt, self.host)
+        self._sync_provider_info(ctxt, volumes, snapshots)
         # FIXME volume count for exporting is wrong
 
         try:
@@ -401,7 +403,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                                               {'status': 'error'})
                 elif volume['status'] in ('downloading', 'creating'):
                     LOG.warning(_LW("Detected volume stuck "
-                                    "in %s(curr_status)s "
+                                    "in %(curr_status)s "
                                     "status, setting to ERROR."),
                                 {'curr_status': volume['status']},
                                 resource=volume)
@@ -577,15 +579,9 @@ class VolumeManager(manager.SchedulerDependentManager):
         1. Delete a volume(normal case)
            Delete a volume and update quotas.
 
-        2. Delete a migration source volume
-           If deleting the source volume in a migration, we want to skip
-           quotas. Also we want to skip other database updates for source
-           volume because these update will be handled at
-           migrate_volume_completion properly.
-
-        3. Delete a migration destination volume
-           If deleting the destination volume in a migration, we want to
-           skip quotas but we need database updates for the volume.
+        2. Delete a migration volume
+           If deleting the volume in a migration, we want to skip
+           quotas but we need database updates for the volume.
       """
 
         context = context.elevated()
@@ -664,15 +660,10 @@ class VolumeManager(manager.SchedulerDependentManager):
                 LOG.exception(_LE("Failed to update usages deleting volume."),
                               resource=volume_ref)
 
-        # If deleting the destination volume in a migration, we should skip
-        # database update here. In other cases, continue to update database
-        # entries.
-        if not is_migrating_dest:
+        # Delete glance metadata if it exists
+        self.db.volume_glance_metadata_delete_by_volume(context, volume_id)
 
-            # Delete glance metadata if it exists
-            self.db.volume_glance_metadata_delete_by_volume(context, volume_id)
-
-            self.db.volume_destroy(context, volume_id)
+        self.db.volume_destroy(context, volume_id)
 
         # If deleting source/destination volume in a migration, we should
         # skip quotas.
@@ -1046,7 +1037,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                                                     image_meta)
             if not image_volume:
                 LOG.warning(_LW('Unable to clone image_volume for image '
-                                '%(image_id) will not create cache entry.'),
+                                '%(image_id)s will not create cache entry.'),
                             {'image_id': image_id})
                 return
 
@@ -1057,7 +1048,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                 image_meta
             )
         except exception.CinderException as e:
-            LOG.warning(_LW('Failed to create new image-volume cache entry'
+            LOG.warning(_LW('Failed to create new image-volume cache entry.'
                             ' Error: %(exception)s'), {'exception': e})
             if image_volume:
                 self.delete_volume(ctx, image_volume.id)
@@ -1105,7 +1096,7 @@ class VolumeManager(manager.SchedulerDependentManager):
             return image_volume
         except exception.CinderException:
             LOG.exception(_LE('Failed to clone volume %(volume_id)s for '
-                              'image %(image_id).'),
+                              'image %(image_id)s.'),
                           {'volume_id': volume.id,
                            'image_id': image_meta['id']})
             try:
@@ -1318,7 +1309,7 @@ class VolumeManager(manager.SchedulerDependentManager):
             raise exception.InvalidInput(reason=six.text_type(err))
         except Exception as err:
             err_msg = (_("Validate volume connection failed "
-                         "(error: %(err)).") % {'err': six.text_type(err)})
+                         "(error: %(err)s).") % {'err': six.text_type(err)})
             LOG.error(err_msg, resource=volume)
             raise exception.VolumeBackendAPIException(data=err_msg)
 
@@ -1782,9 +1773,6 @@ class VolumeManager(manager.SchedulerDependentManager):
             LOG.error(_LE('Failed to request async delete of migration source '
                           'vol %(vol)s: %(err)s'),
                       {'vol': volume_id, 'err': ex})
-        updates = {'migration_status': 'success',
-                   'status': orig_volume_status,
-                   'previous_status': volume['status']}
 
         LOG.info(_LI("Complete-Migrate volume completed successfully."),
                  resource=volume)
@@ -2494,8 +2482,8 @@ class VolumeManager(manager.SchedulerDependentManager):
 
         sorted_snapshots = []
         for vol in volumes:
-            found_snaps = filter(
-                lambda snap: snap['id'] == vol['snapshot_id'], snapshots)
+            found_snaps = [snap for snap in snapshots
+                           if snap['id'] == vol['snapshot_id']]
             if not found_snaps:
                 LOG.error(_LE("Source snapshot cannot be found for target "
                               "volume %(volume_id)s."),
@@ -2517,9 +2505,8 @@ class VolumeManager(manager.SchedulerDependentManager):
 
         sorted_source_vols = []
         for vol in volumes:
-            found_source_vols = filter(
-                lambda source_vol: source_vol['id'] == vol['source_volid'],
-                source_vols)
+            found_source_vols = [source_vol for source_vol in source_vols
+                                 if source_vol['id'] == vol['source_volid']]
             if not found_source_vols:
                 LOG.error(_LE("Source volumes cannot be found for target "
                               "volume %(volume_id)s."),
@@ -3043,6 +3030,13 @@ class VolumeManager(manager.SchedulerDependentManager):
                                volume_status):
         """Finalize migration process on backend device."""
         model_update = None
+        # This is temporary fix for bug 1491210.
+        volume = self.db.volume_get(ctxt, volume['id'])
+        new_volume = self.db.volume_get(ctxt, new_volume['id'])
+        model_update_default = {'_name_id': new_volume['_name_id'] or
+                                new_volume['id'],
+                                'provider_location':
+                                new_volume['provider_location']}
         try:
             model_update = self.driver.update_migrated_volume(ctxt,
                                                               volume,
@@ -3052,19 +3046,31 @@ class VolumeManager(manager.SchedulerDependentManager):
             # If update_migrated_volume is not implemented for the driver,
             # _name_id and provider_location will be set with the values
             # from new_volume.
-            model_update = {'_name_id': new_volume['_name_id'] or
-                            new_volume['id'],
-                            'provider_location':
-                            new_volume['provider_location']}
+            model_update = model_update_default
         if model_update:
-            self.db.volume_update(ctxt.elevated(), volume['id'],
-                                  model_update)
+            model_update_default.update(model_update)
             # Swap keys that were changed in the source so we keep their values
             # in the temporary volume's DB record.
-            model_update_new = {key: volume[key]
-                                for key in model_update.iterkeys()}
+            # Need to convert 'metadata' and 'admin_metadata' since
+            # they are not keys of volume, their corresponding keys are
+            # 'volume_metadata' and 'volume_admin_metadata'.
+            model_update_new = dict()
+            for key in model_update:
+                if key == 'metadata':
+                    if volume.get('volume_metadata'):
+                        model_update_new[key] = {
+                            metadata['key']: metadata['value']
+                            for metadata in volume.get('volume_metadata')}
+                elif key == 'admin_metadata':
+                    model_update_new[key] = {
+                        metadata['key']: metadata['value']
+                        for metadata in volume.get('volume_admin_metadata')}
+                else:
+                    model_update_new[key] = volume[key]
             self.db.volume_update(ctxt.elevated(), new_volume['id'],
                                   model_update_new)
+        self.db.volume_update(ctxt.elevated(), volume['id'],
+                              model_update_default)
 
     # Replication V2 methods
     def enable_replication(self, context, volume):
@@ -3082,7 +3088,11 @@ class VolumeManager(manager.SchedulerDependentManager):
         # we are in an expected state ('enabling')
         volume = self.db.volume_get(context, volume['id'])
         if volume['replication_status'] != 'enabling':
-            raise exception.InvalidVolume()
+            msg = (_("Unable to enable replication due to invalid "
+                     "replication status: %(status)s.") %
+                   {'status': volume['replication_status']})
+            LOG.error(msg, resource=volume)
+            raise exception.InvalidVolume(reason=msg)
 
         try:
             rep_driver_data = self.driver.replication_enable(context,
@@ -3118,7 +3128,11 @@ class VolumeManager(manager.SchedulerDependentManager):
 
         volume = self.db.volume_get(context, volume['id'])
         if volume['replication_status'] != 'disabling':
-            raise exception.InvalidVolume()
+            msg = (_("Unable to disable replication due to invalid "
+                     "replication status: %(status)s.") %
+                   {'status': volume['replication_status']})
+            LOG.error(msg, resource=volume)
+            raise exception.InvalidVolume(reason=msg)
 
         try:
             rep_driver_data = self.driver.replication_disable(context,

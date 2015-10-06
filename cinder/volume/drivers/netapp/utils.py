@@ -24,11 +24,11 @@ NetApp drivers to achieve the desired functionality.
 
 import decimal
 import platform
+import re
 import socket
 
 from oslo_concurrency import processutils as putils
 from oslo_log import log as logging
-from oslo_utils import importutils
 import six
 
 from cinder import context
@@ -73,14 +73,6 @@ def check_flags(required_flags, configuration):
         if not getattr(configuration, flag, None):
             msg = _('Configuration value %s is not set.') % flag
             raise exception.InvalidInput(reason=msg)
-
-
-def check_netapp_lib():
-    if not importutils.try_import('netapp_lib'):
-        msg = ('You have not installed the NetApp API Library for OpenStack. '
-               'Please install it using "sudo pip install netapp-lib" and '
-               'restart this service!')
-        raise exception.NetAppDriverException(msg)
 
 
 def to_bool(val):
@@ -146,35 +138,35 @@ def round_down(value, precision):
 def log_extra_spec_warnings(extra_specs):
     for spec in (set(extra_specs.keys() if extra_specs else []) &
                  set(OBSOLETE_SSC_SPECS.keys())):
-            LOG.warning(_LW('Extra spec %(old)s is obsolete.  Use %(new)s '
-                            'instead.'), {'old': spec,
-                                          'new': OBSOLETE_SSC_SPECS[spec]})
+        LOG.warning(_LW('Extra spec %(old)s is obsolete.  Use %(new)s '
+                        'instead.'), {'old': spec,
+                                      'new': OBSOLETE_SSC_SPECS[spec]})
     for spec in (set(extra_specs.keys() if extra_specs else []) &
                  set(DEPRECATED_SSC_SPECS.keys())):
-            LOG.warning(_LW('Extra spec %(old)s is deprecated.  Use %(new)s '
-                            'instead.'), {'old': spec,
-                                          'new': DEPRECATED_SSC_SPECS[spec]})
+        LOG.warning(_LW('Extra spec %(old)s is deprecated.  Use %(new)s '
+                        'instead.'), {'old': spec,
+                                      'new': DEPRECATED_SSC_SPECS[spec]})
 
 
 def get_iscsi_connection_properties(lun_id, volume, iqn,
                                     address, port):
 
-        properties = {}
-        properties['target_discovered'] = False
-        properties['target_portal'] = '%s:%s' % (address, port)
-        properties['target_iqn'] = iqn
-        properties['target_lun'] = int(lun_id)
-        properties['volume_id'] = volume['id']
-        auth = volume['provider_auth']
-        if auth:
-            (auth_method, auth_username, auth_secret) = auth.split()
-            properties['auth_method'] = auth_method
-            properties['auth_username'] = auth_username
-            properties['auth_password'] = auth_secret
-        return {
-            'driver_volume_type': 'iscsi',
-            'data': properties,
-        }
+    properties = {}
+    properties['target_discovered'] = False
+    properties['target_portal'] = '%s:%s' % (address, port)
+    properties['target_iqn'] = iqn
+    properties['target_lun'] = int(lun_id)
+    properties['volume_id'] = volume['id']
+    auth = volume['provider_auth']
+    if auth:
+        (auth_method, auth_username, auth_secret) = auth.split()
+        properties['auth_method'] = auth_method
+        properties['auth_username'] = auth_username
+        properties['auth_password'] = auth_secret
+    return {
+        'driver_volume_type': 'iscsi',
+        'data': properties,
+    }
 
 
 def validate_qos_spec(qos_spec):
@@ -245,6 +237,31 @@ def get_qos_policy_group_name_from_info(qos_policy_group_info):
     if spec is not None:
         return spec['policy_name']
     return None
+
+
+def get_pool_name_filter_regex(configuration):
+    """Build the regex for filtering pools by name
+
+    :param configuration: The volume driver configuration
+    :raise InvalidConfigurationValue: if configured regex pattern is invalid
+    :return: A compiled regex for filtering pool names
+    """
+
+    # If the configuration parameter is specified as an empty string
+    # (interpreted as matching all pools), we replace it here with
+    # (.+) to be explicit with CSV compatibility support implemented below.
+    pool_patterns = configuration.netapp_pool_name_search_pattern or '(.+)'
+
+    # Strip whitespace from start/end and then 'or' all regex patterns
+    pool_patterns = '|'.join(['^' + pool_pattern.strip('^$ \t') + '$' for
+                              pool_pattern in pool_patterns.split(',')])
+
+    try:
+        return re.compile(pool_patterns)
+    except re.error:
+        raise exception.InvalidConfigurationValue(
+            option='netapp_pool_name_search_pattern',
+            value=configuration.netapp_pool_name_search_pattern)
 
 
 def get_valid_qos_policy_group_info(volume, extra_specs=None):
@@ -462,7 +479,7 @@ class FeatureState(object):
 
         :param supported: True if supported, false otherwise
         :param minimum_version: The minimum version that this feature is
-        suported at
+        supported at
         """
         self.supported = supported
         self.minimum_version = minimum_version

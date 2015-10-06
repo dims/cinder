@@ -2,6 +2,7 @@
 # Copyright (c) 2014 Clinton Knight.  All rights reserved.
 # Copyright (c) 2014 Andrew Kerr.  All rights reserved.
 # Copyright (c) 2015 Tom Barron.  All rights reserved.
+# Copyright (c) 2015 Goutham Pacha Ravi. All rights reserved.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -28,11 +29,10 @@ from oslo_utils import units
 from cinder import exception
 from cinder.i18n import _
 from cinder import test
-from cinder.tests.unit.volume.drivers.netapp.dataontap.client import (
-    fake_api as netapp_api)
 from cinder.tests.unit.volume.drivers.netapp.dataontap import fakes as fake
 import cinder.tests.unit.volume.drivers.netapp.fakes as na_fakes
 from cinder.volume.drivers.netapp.dataontap import block_base
+from cinder.volume.drivers.netapp.dataontap.client import api as netapp_api
 from cinder.volume.drivers.netapp import utils as na_utils
 from cinder.volume import utils as volume_utils
 
@@ -41,9 +41,6 @@ class NetAppBlockStorageLibraryTestCase(test.TestCase):
 
     def setUp(self):
         super(NetAppBlockStorageLibraryTestCase, self).setUp()
-
-        # Inject fake netapp_lib module classes.
-        netapp_api.mock_netapp_lib([block_base])
 
         kwargs = {'configuration': self.get_config_base()}
         self.library = block_base.NetAppBlockStorageLibrary(
@@ -87,10 +84,10 @@ class NetAppBlockStorageLibraryTestCase(test.TestCase):
 
     @mock.patch.object(block_base.NetAppBlockStorageLibrary,
                        '_get_lun_attr',
-                       mock.Mock(return_value={'Volume': 'vol1'}))
+                       mock.Mock(return_value={'Volume': 'FAKE_CMODE_VOL1'}))
     def test_get_pool(self):
         pool = self.library.get_pool({'name': 'volume-fake-uuid'})
-        self.assertEqual('vol1', pool)
+        self.assertEqual('FAKE_CMODE_VOL1', pool)
 
     @mock.patch.object(block_base.NetAppBlockStorageLibrary,
                        '_get_lun_attr',

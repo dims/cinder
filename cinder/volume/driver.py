@@ -323,8 +323,9 @@ class BaseVD(object):
             self.configuration.append_config_values(iser_opts)
             utils.setup_tracing(self.configuration.safe_get('trace_flags'))
 
-        self.set_execute(execute)
+        self._execute = execute
         self._stats = {}
+        self._throttle = None
 
         self.pools = []
         self.capabilities = {}
@@ -452,9 +453,6 @@ class BaseVD(object):
                               {"snapshot": snapshot.id})
                 raise exception.RemoveExportException(volume=snapshot.id,
                                                       reason=ex)
-
-    def set_execute(self, execute):
-        self._execute = execute
 
     def set_initialized(self):
         self._initialized = True
@@ -966,7 +964,26 @@ class BaseVD(object):
                     LOG.error(err_msg)
                     raise exception.VolumeBackendAPIException(data=ex_msg)
                 raise exception.VolumeBackendAPIException(data=err_msg)
-        return (self._connect_device(conn), volume)
+
+        try:
+            attach_info = self._connect_device(conn)
+        except exception.DeviceUnavailable as exc:
+            # We may have reached a point where we have attached the volume,
+            # so we have to detach it (do the cleanup).
+            attach_info = exc.kwargs.get('attach_info', None)
+            if attach_info:
+                try:
+                    LOG.debug('Device for volume %s is unavailable but did '
+                              'attach, detaching it.', volume['id'])
+                    self._detach_volume(context, attach_info, volume,
+                                        properties, force=True,
+                                        remote=remote)
+                except Exception:
+                    LOG.exception(_LE('Error detaching volume %s'),
+                                  volume['id'])
+            raise
+
+        return (attach_info, volume)
 
     def _attach_snapshot(self, context, snapshot, properties, remote=False):
         """Attach the snapshot."""
@@ -1039,17 +1056,26 @@ class BaseVD(object):
         device = connector.connect_volume(conn['data'])
         host_device = device['path']
 
-        # Secure network file systems will NOT run as root.
-        root_access = not self.secure_file_operations_enabled()
+        attach_info = {'conn': conn, 'device': device, 'connector': connector}
 
-        if not connector.check_valid_device(host_device, root_access):
+        unavailable = True
+        try:
+            # Secure network file systems will NOT run as root.
+            root_access = not self.secure_file_operations_enabled()
+            unavailable = not connector.check_valid_device(host_device,
+                                                           root_access)
+        except Exception:
+            LOG.exception(_LE('Could not validate device %s'), host_device)
+
+        if unavailable:
             raise exception.DeviceUnavailable(path=host_device,
+                                              attach_info=attach_info,
                                               reason=(_("Unable to access "
                                                         "the backend storage "
                                                         "via the path "
                                                         "%(path)s.") %
                                                       {'path': host_device}))
-        return {'conn': conn, 'device': device, 'connector': connector}
+        return attach_info
 
     def clone_image(self, context, volume,
                     image_location, image_meta,
@@ -1236,7 +1262,8 @@ class BaseVD(object):
             self.create_cloned_volume(temp_vol_ref, volume)
         except Exception:
             with excutils.save_and_reraise_exception():
-                self.db.volume_destroy(context, temp_vol_ref['id'])
+                self.db.volume_destroy(context.elevated(),
+                                       temp_vol_ref['id'])
 
         self.db.volume_update(context, temp_vol_ref['id'],
                               {'status': 'available'})
@@ -1388,16 +1415,41 @@ class BaseVD(object):
         """
         return None
 
-    def update_provider_info(self, volumes):
+    def update_provider_info(self, volumes, snapshots):
         """Get provider info updates from driver.
 
         :param volumes: List of Cinder volumes to check for updates
+        :param snapshots: List of Cinder snapshots to check for updates
         :return: tuple (volume_updates, snapshot_updates)
 
         where volume updates {'id': uuid, provider_id: <provider-id>}
         and snapshot updates {'id': uuid, provider_id: <provider-id>}
         """
         return None, None
+
+    def migrate_volume(self, context, volume, host):
+        """Migrate volume stub.
+
+        This is for drivers that don't implement an enhanced version
+        of this operation.
+        """
+        return (False, None)
+
+    def manage_existing(self, volume, existing_ref):
+        """Manage exiting stub.
+
+        This is for drivers that don't implement manage_existing().
+        """
+        msg = _("Manage existing volume not implemented.")
+        raise NotImplementedError(msg)
+
+    def unmanage(self, volume):
+        """Unmanage stub.
+
+        This is for drivers that don't implement unmanage().
+        """
+        msg = _("Unmanage volume not implemented.")
+        raise NotImplementedError(msg)
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -1963,8 +2015,7 @@ class VolumeDriver(ConsistencyGroupVD, TransferVD, ManageableVD, ExtendVD,
         raise NotImplementedError(msg)
 
     def unmanage(self, volume):
-        msg = _("Unmanage volume not implemented.")
-        raise NotImplementedError(msg)
+        pass
 
     def manage_existing_snapshot(self, snapshot, existing_ref):
         msg = _("Manage existing snapshot not implemented.")
@@ -2004,7 +2055,7 @@ class VolumeDriver(ConsistencyGroupVD, TransferVD, ManageableVD, ExtendVD,
     def remove_export_snapshot(self, context, snapshot):
         raise NotImplementedError()
 
-    def initialize_connection(self, volume, connector):
+    def initialize_connection(self, volume, connector, **kwargs):
         raise NotImplementedError()
 
     def initialize_connection_snapshot(self, snapshot, connector, **kwargs):

@@ -1,6 +1,7 @@
 # Copyright (c) 2014 Alex Meade.  All rights reserved.
 # Copyright (c) 2014 Clinton Knight.  All rights reserved.
 # Copyright (c) 2015 Tom Barron.  All rights reserved.
+# Copyright (c) 2015 Goutham Pacha Ravi. All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -24,14 +25,13 @@ import mock
 
 from cinder import exception
 from cinder import test
-from cinder.tests.unit.volume.drivers.netapp.dataontap.client import (
-    fake_api as netapp_api)
 import cinder.tests.unit.volume.drivers.netapp.dataontap.client.fakes \
     as client_fakes
 import cinder.tests.unit.volume.drivers.netapp.dataontap.fakes as fake
 import cinder.tests.unit.volume.drivers.netapp.fakes as na_fakes
 from cinder.volume.drivers.netapp.dataontap import block_7mode
 from cinder.volume.drivers.netapp.dataontap import block_base
+from cinder.volume.drivers.netapp.dataontap.client import api as netapp_api
 from cinder.volume.drivers.netapp.dataontap.client import client_base
 from cinder.volume.drivers.netapp import utils as na_utils
 
@@ -43,9 +43,6 @@ class NetAppBlockStorage7modeLibraryTestCase(test.TestCase):
     def setUp(self):
         super(NetAppBlockStorage7modeLibraryTestCase, self).setUp()
 
-        # Inject fake netapp_lib module classes.
-        netapp_api.mock_netapp_lib([block_7mode])
-
         kwargs = {'configuration': self.get_config_7mode()}
         self.library = block_7mode.NetAppBlockStorage7modeLibrary(
             'driver', 'protocol', **kwargs)
@@ -53,6 +50,8 @@ class NetAppBlockStorage7modeLibraryTestCase(test.TestCase):
         self.library.zapi_client = mock.Mock()
         self.zapi_client = self.library.zapi_client
         self.library.vfiler = mock.Mock()
+        # Deprecated option
+        self.library.configuration.netapp_volume_list = None
 
     def tearDown(self):
         super(NetAppBlockStorage7modeLibraryTestCase, self).tearDown()
@@ -106,10 +105,20 @@ class NetAppBlockStorage7modeLibraryTestCase(test.TestCase):
         block_base.NetAppBlockStorageLibrary, 'check_for_setup_error')
     def test_check_for_setup_error(self, super_check_for_setup_error):
         self.zapi_client.get_ontapi_version.return_value = (1, 9)
+        self.mock_object(self.library, '_refresh_volume_info')
+        self.library.volume_list = ['open1', 'open2']
 
         self.library.check_for_setup_error()
 
         super_check_for_setup_error.assert_called_once_with()
+
+    def test_check_for_setup_error_no_filtered_pools(self):
+        self.zapi_client.get_ontapi_version.return_value = (1, 9)
+        self.mock_object(self.library, '_refresh_volume_info')
+        self.library.volume_list = []
+
+        self.assertRaises(exception.NetAppDriverException,
+                          self.library.check_for_setup_error)
 
     def test_check_for_setup_error_too_old(self):
         self.zapi_client.get_ontapi_version.return_value = (1, 8)
@@ -422,7 +431,7 @@ class NetAppBlockStorage7modeLibraryTestCase(test.TestCase):
 
     def test_manage_existing_lun_same_name(self):
         mock_lun = block_base.NetAppLun('handle', 'name', '1',
-                                        {'Path': '/vol/vol1/name'})
+                                        {'Path': '/vol/FAKE_CMODE_VOL1/name'})
         self.library._get_existing_vol_with_manage_ref = mock.Mock(
             return_value=mock_lun)
         self.mock_object(na_utils, 'get_volume_extra_specs')
@@ -441,7 +450,7 @@ class NetAppBlockStorage7modeLibraryTestCase(test.TestCase):
 
     def test_manage_existing_lun_new_path(self):
         mock_lun = block_base.NetAppLun(
-            'handle', 'name', '1', {'Path': '/vol/vol1/name'})
+            'handle', 'name', '1', {'Path': '/vol/FAKE_CMODE_VOL1/name'})
         self.library._get_existing_vol_with_manage_ref = mock.Mock(
             return_value=mock_lun)
         self.mock_object(na_utils, 'get_volume_extra_specs')
@@ -457,7 +466,7 @@ class NetAppBlockStorage7modeLibraryTestCase(test.TestCase):
         self.assertEqual(1, self.library._check_volume_type_for_lun.call_count)
         self.assertEqual(1, self.library._add_lun_to_table.call_count)
         self.zapi_client.move_lun.assert_called_once_with(
-            '/vol/vol1/name', '/vol/vol1/volume')
+            '/vol/FAKE_CMODE_VOL1/name', '/vol/FAKE_CMODE_VOL1/volume')
 
     def test_get_pool_stats_no_volumes(self):
 
@@ -499,3 +508,87 @@ class NetAppBlockStorage7modeLibraryTestCase(test.TestCase):
         }]
 
         self.assertEqual(expected, result)
+
+    def test_get_filtered_pools_invalid_conf(self):
+        """Verify an exception is raised if the regex pattern is invalid."""
+        self.library.configuration.netapp_pool_name_search_pattern = '(.+'
+
+        self.assertRaises(exception.InvalidConfigurationValue,
+                          self.library._get_filtered_pools)
+
+    @ddt.data('.*?3$|mix.+', '(.+?[0-9]+) ', '^.+3$', '^[a-z].*?[^4]$')
+    def test_get_filtered_pools_match_select_pools(self, patterns):
+        self.library.vols = fake.FAKE_7MODE_VOLUME['all']
+        self.library.configuration.netapp_pool_name_search_pattern = patterns
+
+        filtered_pools = self.library._get_filtered_pools()
+
+        self.assertEqual(
+            fake.FAKE_7MODE_VOLUME['all'][0].get_child_content('name'),
+            filtered_pools[0]
+        )
+        self.assertEqual(
+            fake.FAKE_7MODE_VOLUME['all'][1].get_child_content('name'),
+            filtered_pools[1]
+        )
+
+    @ddt.data('', 'mix.+|open.+', '.+', 'open123, mixed3, open1234', '.+')
+    def test_get_filtered_pools_match_all_pools(self, patterns):
+        self.library.vols = fake.FAKE_7MODE_VOLUME['all']
+        self.library.configuration.netapp_pool_name_search_pattern = patterns
+
+        filtered_pools = self.library._get_filtered_pools()
+
+        self.assertEqual(
+            fake.FAKE_7MODE_VOLUME['all'][0].get_child_content('name'),
+            filtered_pools[0]
+        )
+        self.assertEqual(
+            fake.FAKE_7MODE_VOLUME['all'][1].get_child_content('name'),
+            filtered_pools[1]
+        )
+        self.assertEqual(
+            fake.FAKE_7MODE_VOLUME['all'][2].get_child_content('name'),
+            filtered_pools[2]
+        )
+
+    @ddt.data('abc|stackopen|openstack|abc.*', 'abc',
+              'stackopen, openstack, open', '^$')
+    def test_get_filtered_pools_non_matching_patterns(self, patterns):
+
+        self.library.vols = fake.FAKE_7MODE_VOLUME['all']
+        self.library.configuration.netapp_pool_name_search_pattern = patterns
+
+        filtered_pools = self.library._get_filtered_pools()
+
+        self.assertListEqual([], filtered_pools)
+
+    def test_get_pool_stats_no_ssc_vols(self):
+
+        self.library.vols = {}
+
+        pools = self.library._get_pool_stats()
+
+        self.assertListEqual([], pools)
+
+    def test_get_pool_stats_with_filtered_pools(self):
+
+        self.library.vols = fake.FAKE_7MODE_VOL1
+        self.library.volume_list = [
+            fake.FAKE_7MODE_VOL1[0].get_child_content('name')
+        ]
+        self.library.root_volume_name = ''
+
+        pools = self.library._get_pool_stats()
+
+        self.assertListEqual(fake.FAKE_7MODE_POOLS, pools)
+
+    def test_get_pool_stats_no_filtered_pools(self):
+
+        self.library.vols = fake.FAKE_7MODE_VOL1
+        self.library.volume_list = ['open1', 'open2']
+        self.library.root_volume_name = ''
+
+        pools = self.library._get_pool_stats()
+
+        self.assertListEqual([], pools)

@@ -41,17 +41,15 @@ class NetAppEseriesClientDriverTestCase(test.TestCase):
         self.mock_object(client, 'LOG', self.mock_log)
         self.fake_password = 'mysecret'
 
-        # Inject fake netapp_lib module classes.
-        eseries_fake.mock_netapp_lib([client])
-
         self.my_client = client.RestClient('http', 'host', '80', '/test',
                                            'user', self.fake_password,
                                            system_id='fake_sys_id')
-        self.my_client.client._endpoint = eseries_fake.FAKE_ENDPOINT_HTTP
+        self.my_client._endpoint = eseries_fake.FAKE_ENDPOINT_HTTP
 
         fake_response = mock.Mock()
         fake_response.status_code = 200
         self.my_client.invoke_service = mock.Mock(return_value=fake_response)
+        self.my_client.api_version = '01.52.9000.1'
 
     @ddt.data(200, 201, 203, 204)
     def test_eval_response_success(self, status_code):
@@ -66,8 +64,8 @@ class NetAppEseriesClientDriverTestCase(test.TestCase):
         fake_resp.status_code = status_code
         expected_msg = "Response error code - %s." % status_code
 
-        with self.assertRaisesRegexp(es_exception.WebServiceException,
-                                     expected_msg) as exc:
+        with self.assertRaisesRegex(es_exception.WebServiceException,
+                                    expected_msg) as exc:
             self.my_client._eval_response(fake_resp)
 
             self.assertEqual(status_code, exc.status_code)
@@ -80,8 +78,8 @@ class NetAppEseriesClientDriverTestCase(test.TestCase):
         fake_resp.text = resp_text
         expected_msg = "Response error - %s." % resp_text
 
-        with self.assertRaisesRegexp(es_exception.WebServiceException,
-                                     expected_msg) as exc:
+        with self.assertRaisesRegex(es_exception.WebServiceException,
+                                    expected_msg) as exc:
             self.my_client._eval_response(fake_resp)
 
             self.assertEqual(status_code, exc.status_code)
@@ -412,7 +410,7 @@ class NetAppEseriesClientDriverTestCase(test.TestCase):
             client.RestClient, '_get_resource_url',
             mock.Mock(return_value=eseries_fake.FAKE_RESOURCE_URL))
         self.mock_object(
-            self.my_client.client, 'invoke_service',
+            self.my_client, 'invoke_service',
             mock.Mock(return_value=fake_invoke_service))
 
         eseries_info = client.RestClient.get_eseries_api_info(
@@ -631,6 +629,37 @@ class NetAppEseriesClientDriverTestCase(test.TestCase):
                                                        )
         self.assertDictMatch(expected_volume, updated_volume)
 
+    def test_extend_volume(self):
+        new_capacity = 10
+        fake_volume = copy.deepcopy(eseries_fake.VOLUME)
+        self.my_client.features = mock.Mock()
+        self.my_client.features.SSC_API_V2 = na_utils.FeatureState(
+            supported=True)
+        self.my_client._invoke = mock.Mock(return_value=fake_volume)
+
+        expanded_volume = self.my_client.expand_volume(fake_volume['id'],
+                                                       new_capacity)
+
+        url = self.my_client.RESOURCE_PATHS.get('ssc_volume')
+        body = {'newSize': new_capacity, 'sizeUnit': 'gb'}
+        self.my_client._invoke.assert_called_once_with('POST', url, body,
+                                                       **{'object-id':
+                                                          fake_volume['id']})
+        self.assertEqual(fake_volume, expanded_volume)
+
+    def test_extend_volume_unsupported(self):
+        new_capacity = 10
+        min_version = 1
+        fake_volume = copy.deepcopy(eseries_fake.VOLUME)
+        self.my_client.features = mock.Mock()
+        self.my_client.features.SSC_API_V2 = na_utils.FeatureState(
+            supported=False, minimum_version=min_version)
+        self.my_client._invoke = mock.Mock(return_value=fake_volume)
+
+        self.assertRaises(exception.NetAppDriverException,
+                          self.my_client.expand_volume, fake_volume['id'],
+                          new_capacity)
+
     @ddt.data(True, False)
     def test_delete_volume(self, ssc_api_enabled):
         fake_volume = copy.deepcopy(eseries_fake.VOLUME)
@@ -700,3 +729,42 @@ class NetAppEseriesClientDriverTestCase(test.TestCase):
         client.RestClient._init_features(self.my_client)
 
         self.assertTrue(self.my_client.features.SSC_API_V2.supported)
+
+
+@ddt.ddt
+class TestWebserviceClientTestCase(test.TestCase):
+
+    def setUp(self):
+        """sets up the mock tests"""
+        super(TestWebserviceClientTestCase, self).setUp()
+        self.mock_log = mock.Mock()
+        self.mock_object(client, 'LOG', self.mock_log)
+        self.webclient = client.WebserviceClient('http', 'host', '80',
+                                                 '/test', 'user', '****')
+
+    @ddt.data({'params': {'host': None, 'scheme': 'https', 'port': '80'}},
+              {'params': {'host': 'host', 'scheme': None, 'port': '80'}},
+              {'params': {'host': 'host', 'scheme': 'http', 'port': None}})
+    @ddt.unpack
+    def test__validate_params_value_error(self, params):
+        """Tests various scenarios for ValueError in validate method"""
+        self.assertRaises(exception.InvalidInput,
+                          self.webclient._validate_params, **params)
+
+    def test_invoke_service_no_endpoint_error(self):
+        """Tests Exception and Log error if no endpoint is provided"""
+        self.webclient._endpoint = None
+        log_error = 'Unexpected error while invoking web service'
+
+        self.assertRaises(exception.NetAppDriverException,
+                          self.webclient.invoke_service)
+        self.assertTrue(self.mock_log.exception.find(log_error))
+
+    def test_invoke_service(self):
+        """Tests if invoke_service evaluates the right response"""
+        self.webclient._endpoint = eseries_fake.FAKE_ENDPOINT_HTTP
+        self.mock_object(self.webclient.conn, 'request',
+                         mock.Mock(return_value=eseries_fake.FAKE_INVOC_MSG))
+        result = self.webclient.invoke_service()
+
+        self.assertIsNotNone(result)

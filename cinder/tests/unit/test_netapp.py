@@ -1,4 +1,5 @@
 # Copyright (c) 2012 NetApp, Inc.
+# Copyright (c) 2015 Goutham Pacha Ravi.  All rights reserved.
 # All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -22,10 +23,11 @@ from six.moves import http_client
 
 from cinder import exception
 from cinder import test
-from cinder.tests.unit.volume.drivers.netapp.dataontap.client import (
-    fake_api as netapp_api)
+from cinder.tests.unit.volume.drivers.netapp.dataontap import fakes
 from cinder.volume import configuration as conf
 from cinder.volume.drivers.netapp import common
+from cinder.volume.drivers.netapp.dataontap import block_7mode
+from cinder.volume.drivers.netapp.dataontap import block_cmode
 from cinder.volume.drivers.netapp.dataontap.client import client_7mode
 from cinder.volume.drivers.netapp.dataontap.client import client_base
 from cinder.volume.drivers.netapp.dataontap.client import client_cmode
@@ -65,8 +67,8 @@ class FakeHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
 class FakeHttplibSocket(object):
     """A fake socket implementation for http_client.HTTPResponse."""
     def __init__(self, value):
-        self._rbuffer = six.StringIO(value)
-        self._wbuffer = six.StringIO('')
+        self._rbuffer = six.BytesIO(value)
+        self._wbuffer = six.BytesIO()
         oldclose = self._wbuffer.close
 
         def newclose():
@@ -74,24 +76,27 @@ class FakeHttplibSocket(object):
             oldclose()
         self._wbuffer.close = newclose
 
-    def makefile(self, mode, _other):
+    def makefile(self, mode, *args):
         """Returns the socket's internal buffer"""
         if mode == 'r' or mode == 'rb':
             return self._rbuffer
         if mode == 'w' or mode == 'wb':
             return self._wbuffer
 
+    def close(self):
+        pass
 
-RESPONSE_PREFIX_DIRECT_CMODE = """<?xml version='1.0' encoding='UTF-8' ?>
+
+RESPONSE_PREFIX_DIRECT_CMODE = b"""<?xml version='1.0' encoding='UTF-8' ?>
 <!DOCTYPE netapp SYSTEM 'file:/etc/netapp_gx.dtd'>"""
 
-RESPONSE_PREFIX_DIRECT_7MODE = """<?xml version='1.0' encoding='UTF-8' ?>
+RESPONSE_PREFIX_DIRECT_7MODE = b"""<?xml version='1.0' encoding='UTF-8' ?>
 <!DOCTYPE netapp SYSTEM "/na_admin/netapp_filer.dtd">"""
 
-RESPONSE_PREFIX_DIRECT = """
+RESPONSE_PREFIX_DIRECT = b"""
 <netapp version='1.15' xmlns='http://www.netapp.com/filer/admin'>"""
 
-RESPONSE_SUFFIX_DIRECT = """</netapp>"""
+RESPONSE_SUFFIX_DIRECT = b"""</netapp>"""
 
 
 class FakeDirectCMODEServerHandler(FakeHTTPRequestHandler):
@@ -429,6 +434,8 @@ class FakeDirectCMODEServerHandler(FakeHTTPRequestHandler):
         s.end_headers()
         s.wfile.write(RESPONSE_PREFIX_DIRECT_CMODE)
         s.wfile.write(RESPONSE_PREFIX_DIRECT)
+        if isinstance(body, six.text_type):
+            body = body.encode('utf-8')
         s.wfile.write(body)
         s.wfile.write(RESPONSE_SUFFIX_DIRECT)
 
@@ -464,8 +471,10 @@ class FakeDirectCmodeHTTPConnection(object):
         req_str = '%s %s HTTP/1.1\r\n' % (method, path)
         for key, value in headers.items():
             req_str += "%s: %s\r\n" % (key, value)
+        if isinstance(req_str, six.text_type):
+            req_str = req_str.encode('latin1')
         if data:
-            req_str += '\r\n%s' % data
+            req_str += b'\r\n' + data
 
         # NOTE(vish): normally the http transport normalizes from unicode
         sock = FakeHttplibSocket(req_str.decode("latin-1").encode("utf-8"))
@@ -486,6 +495,9 @@ class FakeDirectCmodeHTTPConnection(object):
 
     def getresponsebody(self):
         return self.sock.result
+
+    def close(self):
+        pass
 
 
 class NetAppDirectCmodeISCSIDriverTestCase(test.TestCase):
@@ -557,10 +569,6 @@ class NetAppDirectCmodeISCSIDriverTestCase(test.TestCase):
             lambda a, b, c, synchronous: None)
         self.mock_object(utils, 'OpenStackInfo')
 
-        # Inject fake netapp_lib module classes.
-        netapp_api.mock_netapp_lib([common, client_cmode, client_base])
-        self.mock_object(common.na_utils, 'check_netapp_lib')
-
         configuration = self._set_config(create_configuration())
         driver = common.NetAppDriver(configuration=configuration)
         self.stubs.Set(http_client, 'HTTPConnection',
@@ -583,6 +591,9 @@ class NetAppDirectCmodeISCSIDriverTestCase(test.TestCase):
         self.driver.library.zapi_client = mock.MagicMock()
         self.driver.library.zapi_client.get_ontapi_version.return_value = \
             (1, 20)
+        self.mock_object(block_cmode.NetAppBlockStorageCmodeLibrary,
+                         '_get_filtered_pools',
+                         mock.Mock(return_value=fakes.FAKE_CMODE_POOLS))
         self.driver.check_for_setup_error()
 
     def test_do_setup_all_default(self):
@@ -777,10 +788,6 @@ class NetAppDriverNegativeTestCase(test.TestCase):
 
     def setUp(self):
         super(NetAppDriverNegativeTestCase, self).setUp()
-
-        # Inject fake netapp_lib module classes.
-        netapp_api.mock_netapp_lib([common])
-        self.mock_object(common.na_utils, 'check_netapp_lib')
 
     def test_incorrect_family(self):
         self.mock_object(utils, 'OpenStackInfo')
@@ -1177,6 +1184,8 @@ class FakeDirect7MODEServerHandler(FakeHTTPRequestHandler):
         s.end_headers()
         s.wfile.write(RESPONSE_PREFIX_DIRECT_7MODE)
         s.wfile.write(RESPONSE_PREFIX_DIRECT)
+        if isinstance(body, six.text_type):
+            body = body.encode('utf-8')
         s.wfile.write(body)
         s.wfile.write(RESPONSE_SUFFIX_DIRECT)
 
@@ -1197,8 +1206,10 @@ class FakeDirect7modeHTTPConnection(object):
         req_str = '%s %s HTTP/1.1\r\n' % (method, path)
         for key, value in headers.items():
             req_str += "%s: %s\r\n" % (key, value)
+        if isinstance(req_str, six.text_type):
+            req_str = req_str.encode('latin1')
         if data:
-            req_str += '\r\n%s' % data
+            req_str += b'\r\n' + data
 
         # NOTE(vish): normally the http transport normailizes from unicode
         sock = FakeHttplibSocket(req_str.decode("latin-1").encode("utf-8"))
@@ -1219,6 +1230,9 @@ class FakeDirect7modeHTTPConnection(object):
 
     def getresponsebody(self):
         return self.sock.result
+
+    def close(self):
+        pass
 
 
 class NetAppDirect7modeISCSIDriverTestCase_NV(test.TestCase):
@@ -1244,10 +1258,6 @@ class NetAppDirect7modeISCSIDriverTestCase_NV(test.TestCase):
 
     def _custom_setup(self):
         self.mock_object(utils, 'OpenStackInfo')
-
-        # Inject fake netapp_lib module classes.
-        netapp_api.mock_netapp_lib([common, client_base, client_7mode])
-        self.mock_object(common.na_utils, 'check_netapp_lib')
 
         configuration = self._set_config(create_configuration())
         driver = common.NetAppDriver(configuration=configuration)
@@ -1279,6 +1289,9 @@ class NetAppDirect7modeISCSIDriverTestCase_NV(test.TestCase):
         self.driver.library.zapi_client = mock.MagicMock()
         self.driver.library.zapi_client.get_ontapi_version.\
             return_value = (1, 20)
+        self.mock_object(block_7mode.NetAppBlockStorage7modeLibrary,
+                         '_get_filtered_pools',
+                         mock.Mock(return_value=fakes.FAKE_7MODE_POOLS))
         self.driver.check_for_setup_error()
 
     def test_check_for_setup_error_version(self):
@@ -1305,10 +1318,6 @@ class NetAppDirect7modeISCSIDriverTestCase_WV(
 
     def _custom_setup(self):
         self.mock_object(utils, 'OpenStackInfo')
-
-        # Inject fake netapp_lib module classes.
-        netapp_api.mock_netapp_lib([common, client_base, client_7mode])
-        self.mock_object(common.na_utils, 'check_netapp_lib')
 
         configuration = self._set_config(create_configuration())
         driver = common.NetAppDriver(configuration=configuration)

@@ -15,7 +15,6 @@
 
 import datetime
 import functools
-import hashlib
 import os
 import time
 import uuid
@@ -66,161 +65,6 @@ class ExecuteTestCase(test.TestCase):
         mock_putils_exe.assert_called_once_with('a', 1, foo='bar',
                                                 run_as_root=True,
                                                 root_helper=mock_helper)
-
-
-class GetFromPathTestCase(test.TestCase):
-    def test_tolerates_nones(self):
-        f = utils.get_from_path
-
-        input = []
-        self.assertEqual([], f(input, "a"))
-        self.assertEqual([], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [None]
-        self.assertEqual([], f(input, "a"))
-        self.assertEqual([], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': None}]
-        self.assertEqual([], f(input, "a"))
-        self.assertEqual([], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': None}}]
-        self.assertEqual([{'b': None}], f(input, "a"))
-        self.assertEqual([], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': {'c': None}}}]
-        self.assertEqual([{'b': {'c': None}}], f(input, "a"))
-        self.assertEqual([{'c': None}], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': {'c': None}}}, {'a': None}]
-        self.assertEqual([{'b': {'c': None}}], f(input, "a"))
-        self.assertEqual([{'c': None}], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': {'c': None}}}, {'a': {'b': None}}]
-        self.assertEqual([{'b': {'c': None}}, {'b': None}], f(input, "a"))
-        self.assertEqual([{'c': None}], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-    def test_does_select(self):
-        f = utils.get_from_path
-
-        input = [{'a': 'a_1'}]
-        self.assertEqual(['a_1'], f(input, "a"))
-        self.assertEqual([], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': 'b_1'}}]
-        self.assertEqual([{'b': 'b_1'}], f(input, "a"))
-        self.assertEqual(['b_1'], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': {'c': 'c_1'}}}]
-        self.assertEqual([{'b': {'c': 'c_1'}}], f(input, "a"))
-        self.assertEqual([{'c': 'c_1'}], f(input, "a/b"))
-        self.assertEqual(['c_1'], f(input, "a/b/c"))
-
-        input = [{'a': {'b': {'c': 'c_1'}}}, {'a': None}]
-        self.assertEqual([{'b': {'c': 'c_1'}}], f(input, "a"))
-        self.assertEqual([{'c': 'c_1'}], f(input, "a/b"))
-        self.assertEqual(['c_1'], f(input, "a/b/c"))
-
-        input = [{'a': {'b': {'c': 'c_1'}}},
-                 {'a': {'b': None}}]
-        self.assertEqual([{'b': {'c': 'c_1'}}, {'b': None}], f(input, "a"))
-        self.assertEqual([{'c': 'c_1'}], f(input, "a/b"))
-        self.assertEqual(['c_1'], f(input, "a/b/c"))
-
-        input = [{'a': {'b': {'c': 'c_1'}}},
-                 {'a': {'b': {'c': 'c_2'}}}]
-        self.assertEqual([{'b': {'c': 'c_1'}}, {'b': {'c': 'c_2'}}],
-                         f(input, "a"))
-        self.assertEqual([{'c': 'c_1'}, {'c': 'c_2'}], f(input, "a/b"))
-        self.assertEqual(['c_1', 'c_2'], f(input, "a/b/c"))
-
-        self.assertEqual([], f(input, "a/b/c/d"))
-        self.assertEqual([], f(input, "c/a/b/d"))
-        self.assertEqual([], f(input, "i/r/t"))
-
-    def test_flattens_lists(self):
-        f = utils.get_from_path
-
-        input = [{'a': [1, 2, 3]}]
-        self.assertEqual([1, 2, 3], f(input, "a"))
-        self.assertEqual([], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': [1, 2, 3]}}]
-        self.assertEqual([{'b': [1, 2, 3]}], f(input, "a"))
-        self.assertEqual([1, 2, 3], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': {'b': [1, 2, 3]}}, {'a': {'b': [4, 5, 6]}}]
-        self.assertEqual([1, 2, 3, 4, 5, 6], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': [{'b': [1, 2, 3]}, {'b': [4, 5, 6]}]}]
-        self.assertEqual([1, 2, 3, 4, 5, 6], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = [{'a': [1, 2, {'b': 'b_1'}]}]
-        self.assertEqual([1, 2, {'b': 'b_1'}], f(input, "a"))
-        self.assertEqual(['b_1'], f(input, "a/b"))
-
-    def test_bad_xpath(self):
-        f = utils.get_from_path
-
-        self.assertRaises(exception.Error, f, [], None)
-        self.assertRaises(exception.Error, f, [], "")
-        self.assertRaises(exception.Error, f, [], "/")
-        self.assertRaises(exception.Error, f, [], "/a")
-        self.assertRaises(exception.Error, f, [], "/a/")
-        self.assertRaises(exception.Error, f, [], "//")
-        self.assertRaises(exception.Error, f, [], "//a")
-        self.assertRaises(exception.Error, f, [], "a//a")
-        self.assertRaises(exception.Error, f, [], "a//a/")
-        self.assertRaises(exception.Error, f, [], "a/a/")
-
-    def test_real_failure1(self):
-        # Real world failure case...
-        #  We weren't coping when the input was a Dictionary instead of a List
-        # This led to test_accepts_dictionaries
-        f = utils.get_from_path
-
-        inst = {'fixed_ip': {'floating_ips': [{'address': '1.2.3.4'}],
-                             'address': '192.168.0.3'},
-                'hostname': ''}
-
-        private_ips = f(inst, 'fixed_ip/address')
-        public_ips = f(inst, 'fixed_ip/floating_ips/address')
-        self.assertEqual(['192.168.0.3'], private_ips)
-        self.assertEqual(['1.2.3.4'], public_ips)
-
-    def test_accepts_dictionaries(self):
-        f = utils.get_from_path
-
-        input = {'a': [1, 2, 3]}
-        self.assertEqual([1, 2, 3], f(input, "a"))
-        self.assertEqual([], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = {'a': {'b': [1, 2, 3]}}
-        self.assertEqual([{'b': [1, 2, 3]}], f(input, "a"))
-        self.assertEqual([1, 2, 3], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = {'a': [{'b': [1, 2, 3]}, {'b': [4, 5, 6]}]}
-        self.assertEqual([1, 2, 3, 4, 5, 6], f(input, "a/b"))
-        self.assertEqual([], f(input, "a/b/c"))
-
-        input = {'a': [1, 2, {'b': 'b_1'}]}
-        self.assertEqual([1, 2, {'b': 'b_1'}], f(input, "a"))
-        self.assertEqual(['b_1'], f(input, "a/b"))
 
 
 class GenericUtilsTestCase(test.TestCase):
@@ -407,17 +251,6 @@ class GenericUtilsTestCase(test.TestCase):
                           utils.safe_minidom_parse_string,
                           killer_body())
 
-    def test_xhtml_escape(self):
-        self.assertEqual('&quot;foo&quot;', utils.xhtml_escape('"foo"'))
-        self.assertEqual('&apos;foo&apos;', utils.xhtml_escape("'foo'"))
-
-    def test_hash_file(self):
-        data = b'Mary had a little lamb, its fleece as white as snow'
-        flo = six.BytesIO(data)
-        h1 = utils.hash_file(flo)
-        h2 = hashlib.sha1(data).hexdigest()
-        self.assertEqual(h1, h2)
-
     def test_check_ssh_injection(self):
         cmd_list = ['ssh', '-D', 'my_name@name_of_remote_computer']
         self.assertIsNone(utils.check_ssh_injection(cmd_list))
@@ -467,17 +300,6 @@ class GenericUtilsTestCase(test.TestCase):
         self.assertRaises(exception.SSHInjectionThreat,
                           utils.check_ssh_injection,
                           with_multiple_quotes)
-
-    @mock.patch('paramiko.SSHClient')
-    def test_create_channel(self, mock_client):
-        test_width = 600
-        test_height = 800
-        mock_channel = mock.Mock()
-        mock_client.invoke_shell.return_value = mock_channel
-        utils.create_channel(mock_client, test_width, test_height)
-        mock_client.invoke_shell.assert_called_once_with()
-        mock_channel.resize_pty.assert_called_once_with(test_width,
-                                                        test_height)
 
     @mock.patch('os.stat')
     def test_get_file_mode(self, mock_stat):
@@ -1376,7 +1198,7 @@ class IsBlkDeviceTestCase(test.TestCase):
 
 
 class WrongException(Exception):
-        pass
+    pass
 
 
 class TestRetryDecorator(test.TestCase):
@@ -1504,22 +1326,6 @@ class TestRetryDecorator(test.TestCase):
 
             self.assertRaises(WrongException, raise_unexpected_error)
             self.assertFalse(mock_sleep.called)
-
-
-class VersionTestCase(test.TestCase):
-    def test_convert_version_to_int(self):
-        self.assertEqual(6002000, utils.convert_version_to_int('6.2.0'))
-        self.assertEqual(6004003, utils.convert_version_to_int((6, 4, 3)))
-        self.assertEqual(5, utils.convert_version_to_int((5, )))
-        self.assertRaises(exception.CinderException,
-                          utils.convert_version_to_int, '5a.6b')
-
-    def test_convert_version_to_string(self):
-        self.assertEqual('6.7.0', utils.convert_version_to_str(6007000))
-        self.assertEqual('4', utils.convert_version_to_str(4))
-
-    def test_convert_version_to_tuple(self):
-        self.assertEqual((6, 7, 0), utils.convert_version_to_tuple('6.7.0'))
 
 
 class LogTracingTestCase(test.TestCase):

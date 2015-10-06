@@ -656,9 +656,9 @@ class CommandLineHelper(object):
             if rc != 0:
                 self._raise_cli_error(command_modify_lun, rc, out)
 
-    def create_consistencygroup(self, cg_name, members=None):
+    def create_consistencygroup(self, cg_name, members=None, poll=False):
         """create the consistency group."""
-        command_create_cg = ('-np', 'snap', '-group',
+        command_create_cg = ('snap', '-group',
                              '-create',
                              '-name', cg_name,
                              '-allowSnapAutoDelete', 'no')
@@ -666,7 +666,7 @@ class CommandLineHelper(object):
             command_create_cg += ('-res', ','.join(map(six.text_type,
                                                        members)))
 
-        out, rc = self.command_execute(*command_create_cg)
+        out, rc = self.command_execute(*command_create_cg, poll=poll)
         if rc != 0:
             # Ignore the error if consistency group already exists
             if VNXError.has_error(out, VNXError.CG_EXISTED):
@@ -712,22 +712,6 @@ class CommandLineHelper(object):
                           "group %(cg_name)s."), {'lun': lun_id,
                                                   'cg_name': cg_name})
             self._raise_cli_error(add_lun_to_cg_cmd, rc, out)
-
-        def add_lun_to_consistency_success():
-            data = self.get_consistency_group_by_name(cg_name)
-            if str(lun_id) in data['Luns']:
-                LOG.debug("Add lun %(lun)s to consistency "
-                          "group %(cg_name)s successfully.",
-                          {'lun': lun_id, 'cg_name': cg_name})
-                return True
-            else:
-                LOG.debug("Adding lun %(lun)s to consistency "
-                          "group %(cg_name)s.",
-                          {'lun': lun_id, 'cg_name': cg_name})
-                return False
-
-        self._wait_for_a_condition(add_lun_to_consistency_success,
-                                   interval=INTERVAL_30_SEC)
 
     def remove_luns_from_consistencygroup(self, cg_name, remove_ids,
                                           poll=False):
@@ -1591,7 +1575,6 @@ class CommandLineHelper(object):
         return False
 
     def find_available_iscsi_targets(self, hostname,
-                                     preferred_sp,
                                      registered_spport_set,
                                      all_iscsi_targets):
         """Finds available iscsi targets for a host.
@@ -1610,28 +1593,22 @@ class CommandLineHelper(object):
         else:
             iscsi_initiator_ips = None
 
-        # Check the targets on the owner first
-        if preferred_sp == 'A':
-            target_sps = ('A', 'B')
-        else:
-            target_sps = ('B', 'A')
-
         target_portals = []
-        for target_sp in target_sps:
-            sp_portals = all_iscsi_targets[target_sp]
-            random.shuffle(sp_portals)
-            for portal in sp_portals:
-                spport = (portal['SP'],
-                          portal['Port ID'],
-                          portal['Virtual Port ID'])
-                if spport not in registered_spport_set:
-                    LOG.debug(
-                        "Skip SP Port %(port)s since "
-                        "no path from %(host)s is through it.",
-                        {'port': spport,
-                         'host': hostname})
-                    continue
-                target_portals.append(portal)
+
+        all_portals = all_iscsi_targets['A'] + all_iscsi_targets['B']
+        random.shuffle(all_portals)
+        for portal in all_portals:
+            spport = (portal['SP'],
+                      portal['Port ID'],
+                      portal['Virtual Port ID'])
+            if spport not in registered_spport_set:
+                LOG.debug(
+                    "Skip SP Port %(port)s since "
+                    "no path from %(host)s is through it.",
+                    {'port': spport,
+                     'host': hostname})
+                continue
+            target_portals.append(portal)
 
         main_portal_index = None
         if iscsi_initiator_ips:
@@ -1674,7 +1651,7 @@ class CommandLineHelper(object):
             # When active sp is unavailable, switch to another sp
             # and set it to active and force a poll
             if self._toggle_sp():
-                LOG.debug('EMC: Command Exception: %(rc) %(result)s. '
+                LOG.debug('EMC: Command Exception: %(rc)s %(result)s. '
                           'Retry on another SP.', {'rc': rc,
                                                    'result': out})
                 kwargv['poll'] = True
@@ -2199,7 +2176,7 @@ class EMCVnxCliBase(object):
         if len(target_pool_name) == 0:
             # Destination host is using a legacy driver
             LOG.warning(_LW("Didn't get the pool information of the "
-                            "host %(s). Storage assisted Migration is not "
+                            "host %s. Storage assisted Migration is not "
                             "supported. The host may be using a legacy "
                             "driver."),
                         host['name'])
@@ -3192,13 +3169,12 @@ class EMCVnxCliBase(object):
 
     def vnx_get_iscsi_properties(self, volume, connector, hlu, sg_raw_output):
         storage_group = connector['host']
-        owner_sp = self.get_lun_owner(volume)
         registered_spports = self._client.get_registered_spport_set(
             connector['initiator'],
             storage_group,
             sg_raw_output)
         targets = self._client.find_available_iscsi_targets(
-            storage_group, owner_sp,
+            storage_group,
             registered_spports,
             self.iscsi_targets)
         properties = {'target_discovered': False,
@@ -3825,7 +3801,8 @@ class CreateConsistencyGroupTask(task.Task):
     def execute(self, client, group, *args, **kwargs):
         LOG.debug('CreateConsistencyGroupTask.execute')
         lun_ids = [kwargs[key] for key in self.lun_id_keys]
-        client.create_consistencygroup(group['id'], lun_ids)
+        client.create_consistencygroup(group['id'], lun_ids,
+                                       poll=True)
 
 
 class WaitMigrationsCompleteTask(task.Task):

@@ -78,7 +78,7 @@ class retry(object):
         self._sleep_factor = sleep_factor
 
     def __call__(self, fun):
-        func_name = fun.func_name
+        func_name = fun.__name__
 
         @functools.wraps(fun)
         def wrapped(*args, **kwargs):
@@ -835,11 +835,6 @@ class SRBISCSIDriver(SRBDriver, driver.ISCSIDriver):
         self.backend_name =\
             self.configuration.safe_get('volume_backend_name') or 'SRB_iSCSI'
         self.protocol = 'iSCSI'
-
-    def set_execute(self, execute):
-        super(SRBISCSIDriver, self).set_execute(execute)
-        if self.target_driver is not None:
-            self.target_driver.set_execute(execute)
 
     def ensure_export(self, context, volume):
         device_path = self._mapper_path(volume)

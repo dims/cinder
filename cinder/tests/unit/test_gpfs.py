@@ -65,7 +65,10 @@ class GPFSDriverTestCase(test.TestCase):
 
         self.driver = gpfs.GPFSDriver(configuration=conf.Configuration(None))
         self.driver.gpfs_execute = self._execute_wrapper
-        self.driver.set_execute(self._execute_wrapper)
+        exec_patcher = mock.patch.object(self.driver, '_execute',
+                                         self._execute_wrapper)
+        exec_patcher.start()
+        self.addCleanup(exec_patcher.stop)
         self.driver._cluster_id = '123456'
         self.driver._gpfs_device = '/dev/gpfs'
         self.driver._storage_pool = 'system'
@@ -80,11 +83,11 @@ class GPFSDriverTestCase(test.TestCase):
         CONF.gpfs_images_dir = self.images_dir
 
     def _cleanup(self, images_dir, volumes_path):
-            try:
-                os.rmdir(images_dir)
-                os.rmdir(volumes_path)
-            except OSError:
-                pass
+        try:
+            os.rmdir(images_dir)
+            os.rmdir(volumes_path)
+        except OSError:
+            pass
 
     def test_different(self):
         self.assertTrue(gpfs._different((True, False)))
@@ -1915,7 +1918,6 @@ class GPFSNFSDriverTestCase(test.TestCase):
         self.driver = gpfs.GPFSNFSDriver(configuration=conf.
                                          Configuration(None))
         self.driver.gpfs_execute = self._execute_wrapper
-        self.driver.set_execute(self._execute_wrapper)
         self.context = context.get_admin_context()
         self.context.user_id = 'fake'
         self.context.project_id = 'fake'

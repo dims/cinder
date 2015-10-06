@@ -144,6 +144,69 @@ class HackingTestCase(test.TestCase):
     def _assert_has_no_errors(self, code, checker, filename=None):
         self._assert_has_errors(code, checker, filename=filename)
 
+    def test_logging_format_args(self):
+        checker = checks.CheckLoggingFormatArgs
+        code = """
+               import logging
+               LOG = logging.getLogger()
+               LOG.info("Message without a second argument.")
+               LOG.critical("Message with %s arguments.", 'two')
+               LOG.debug("Volume %s caught fire and is at %d degrees C and"
+                         " climbing.", 'volume1', 500)
+               """
+        self._assert_has_no_errors(code, checker)
+
+        code = """
+               import logging
+               LOG = logging.getLogger()
+               LOG.{0}("Volume %s caught fire and is at %d degrees C and "
+                      "climbing.", ('volume1', 500))
+               """
+        for method in checker.LOG_METHODS:
+            self._assert_has_errors(code.format(method), checker,
+                                    expected_errors=[(4, 21, 'C310')])
+
+        code = """
+               import logging
+               LOG = logging.getLogger()
+               LOG.log(logging.DEBUG, "Volume %s caught fire and is at %d"
+                       " degrees C and climbing.", ('volume1', 500))
+               """
+        self._assert_has_errors(code, checker,
+                                expected_errors=[(4, 37, 'C310')])
+
+    def test_opt_type_registration_args(self):
+        checker = checks.CheckOptRegistrationArgs
+        code = """
+               CONF.register_opts([opt1, opt2, opt3])
+               CONF.register_opt(lonely_opt)
+               CONF.register_opts([OPT1, OPT2], group="group_of_opts")
+               CONF.register_opt(single_opt, group=blah)
+               """
+        self._assert_has_no_errors(code, checker)
+
+        code = """
+               CONF.register_opt([opt4, opt5, opt6])
+               CONF.register_opts(lonely_opt)
+               CONF.register_opt((an_opt, another_opt))
+               """
+        for method in checker.register_methods:
+            self._assert_has_errors(code.format(method), checker,
+                                    expected_errors=[(1, 18, 'C311'),
+                                                     (2, 19, 'C311'),
+                                                     (3, 19, 'C311')])
+
+        code = """
+               CONF.register_opt(single_opt)
+               CONF.register_opts(other_opt)
+               CONF.register_opt(multiple_opts)
+               tuple_opts = (one_opt, two_opt)
+               CONF.register_opts(tuple_opts)
+               """
+        self._assert_has_errors(code, checker,
+                                expected_errors=[(2, 19, 'C311'),
+                                                 (3, 18, 'C311')])
+
     def test_str_unicode_exception(self):
 
         checker = checks.CheckForStrUnicodeExc

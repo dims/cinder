@@ -324,7 +324,7 @@ class ZFSSAISCSIDriver(driver.ISCSIDriver):
 
         if ('origin' in lun2del and
                 lun2del['origin']['project'] == lcfg.zfssa_cache_project):
-                self._check_origin(lun2del, volume['name'])
+            self._check_origin(lun2del, volume['name'])
 
     def create_snapshot(self, snapshot):
         """Creates a snapshot of a volume.
@@ -393,7 +393,8 @@ class ZFSSAISCSIDriver(driver.ISCSIDriver):
         data["storage_protocol"] = self.protocol
 
         lcfg = self.configuration
-        (avail, total) = self.zfssa.get_pool_stats(lcfg.zfssa_pool)
+        (avail, total) = self.zfssa.get_project_stats(lcfg.zfssa_pool,
+                                                      lcfg.zfssa_project)
         if avail is None or total is None:
             return
 
