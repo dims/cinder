@@ -25,6 +25,5 @@ redis>=2.10.0
 pyzmq>=14.3.1 # LGPL+BSD
 testresources>=0.2.4
 testscenarios>=0.4
-os-testr>=0.4.1
 tempest-lib>=0.9.0
 bandit>=0.13.2
