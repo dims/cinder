@@ -2,9 +2,6 @@ language: python
 env:
   - TOXENV=py27
 install:
-  - travis_retry pip install codecov
   - travis_retry pip install tox
 script:
   - tox -- --concurrency=10
-after_success:
-    codecov
