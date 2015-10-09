@@ -18,6 +18,7 @@ Tests for Backup swift code.
 """
 
 import bz2
+import ddt
 import filecmp
 import hashlib
 import os
@@ -42,6 +43,8 @@ from cinder.tests.unit.backup import fake_swift_client2
 
 CONF = cfg.CONF
 
+ANY = mock.ANY
+
 
 def fake_md5(arg):
     class result(object):
@@ -52,6 +55,7 @@ def fake_md5(arg):
     return ret
 
 
+@ddt.ddt
 class BackupSwiftTestCase(test.TestCase):
     """Test Case for swift."""
 
@@ -105,6 +109,11 @@ class BackupSwiftTestCase(test.TestCase):
         for _i in range(0, 64):
             self.volume_file.write(os.urandom(1024))
 
+        notify_patcher = mock.patch(
+            'cinder.volume.utils.notify_about_backup_usage')
+        notify_patcher.start()
+        self.addCleanup(notify_patcher.stop)
+
     def test_backup_swift_url(self):
         self.ctxt.service_catalog = [{u'type': u'object-store',
                                       u'name': u'swift',
@@ -133,6 +142,41 @@ class BackupSwiftTestCase(test.TestCase):
         self.assertRaises(exception.BackupDriverException,
                           swift_dr.SwiftBackupDriver,
                           self.ctxt)
+
+    @ddt.data(
+        {'auth': 'single_user', 'insecure': True},
+        {'auth': 'single_user', 'insecure': False},
+        {'auth': 'per_user', 'insecure': True},
+        {'auth': 'per_user', 'insecure': False},
+    )
+    @ddt.unpack
+    def test_backup_swift_auth_insecure(self, auth, insecure):
+        self.override_config("backup_swift_auth_insecure", insecure)
+        self.override_config('backup_swift_auth', auth)
+        if auth == 'single_user':
+            self.override_config('backup_swift_user', 'swift-user')
+
+        mock_connection = self.mock_object(swift, 'Connection')
+
+        swift_dr.SwiftBackupDriver(self.ctxt)
+
+        if auth == 'single_user':
+            mock_connection.assert_called_once_with(insecure=insecure,
+                                                    authurl=ANY,
+                                                    auth_version=ANY,
+                                                    tenant_name=ANY,
+                                                    user=ANY,
+                                                    key=ANY,
+                                                    retries=ANY,
+                                                    starting_backoff=ANY,
+                                                    cacert=ANY)
+        else:
+            mock_connection.assert_called_once_with(insecure=insecure,
+                                                    retries=ANY,
+                                                    preauthurl=ANY,
+                                                    preauthtoken=ANY,
+                                                    starting_backoff=ANY,
+                                                    cacert=ANY)
 
     def test_backup_uncompressed(self):
         volume_id = '2b9f10a3-42b4-4fdf-b316-000000ceb039'

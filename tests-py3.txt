@@ -1,3 +1,4 @@
+cinder.tests.unit.image.test_cache
 cinder.tests.unit.image.test_glance
 cinder.tests.unit.keymgr.test_mock_key_mgr
 cinder.tests.unit.scheduler.test_allocated_capacity_weigher
@@ -13,6 +14,7 @@ cinder.tests.unit.scheduler.test_scheduler_options
 cinder.tests.unit.scheduler.test_volume_number_weigher
 cinder.tests.unit.targets.test_base_iscsi_driver
 cinder.tests.unit.targets.test_cxt_driver
+cinder.tests.unit.targets.test_iet_driver
 cinder.tests.unit.targets.test_iser_driver
 cinder.tests.unit.targets.test_lio_driver
 cinder.tests.unit.targets.test_scst_driver
@@ -52,6 +54,7 @@ cinder.tests.unit.test_hp_xp_fc
 cinder.tests.unit.test_hplefthand
 cinder.tests.unit.test_huawei_drivers
 cinder.tests.unit.test_huawei_drivers_compatibility
+cinder.tests.unit.test_ibm_flashsystem
 cinder.tests.unit.test_ibm_flashsystem_iscsi
 cinder.tests.unit.test_ibm_xiv_ds8k
 cinder.tests.unit.test_ibmnas
