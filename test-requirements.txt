@@ -7,7 +7,6 @@ hacking<0.11,>=0.10.0
 
 -e git+https://github.com/openstack/oslosphinx.git#egg=oslosphinx
 -e git+https://github.com/openstack/oslotest.git#egg=oslotest
--e git+https://github.com/openstack/os-testr.git#egg=os-testr
 
 coverage>=3.6
 ddt>=0.7.0
