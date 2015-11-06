@@ -25,7 +25,6 @@ import sys
 import threading
 import time
 import uuid
-import warnings
 
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -109,8 +108,8 @@ def get_backend():
 def is_admin_context(context):
     """Indicates if the request context is an administrator."""
     if not context:
-        warnings.warn(_('Use of empty request context is deprecated'),
-                      DeprecationWarning)
+        LOG.warning(_LW('Use of empty request context is deprecated'),
+                    DeprecationWarning)
         raise Exception('die')
     return context.is_admin
 
@@ -1203,9 +1202,11 @@ def finish_volume_migration(context, src_vol_id, dest_vol_id):
     """
     session = get_session()
     with session.begin():
-        src_volume_ref = _volume_get(context, src_vol_id, session=session)
+        src_volume_ref = _volume_get(context, src_vol_id, session=session,
+                                     joined_load=False)
         src_original_data = dict(src_volume_ref.iteritems())
-        dest_volume_ref = _volume_get(context, dest_vol_id, session=session)
+        dest_volume_ref = _volume_get(context, dest_vol_id, session=session,
+                                      joined_load=False)
 
         # NOTE(rpodolyaka): we should copy only column values, while model
         #                   instances also have relationships attributes, which
@@ -1335,7 +1336,24 @@ def volume_detached(context, volume_id, attachment_id):
 
 
 @require_context
-def _volume_get_query(context, session=None, project_only=False):
+def _volume_get_query(context, session=None, project_only=False,
+                      joined_load=True):
+    """Get the query to retrieve the volume.
+
+    :param context: the context used to run the method _volume_get_query
+    :param session: the session to use
+    :param project_only: the boolean used to decide whether to query the
+                         volume in the current project or all projects
+    :param joined_load: the boolean used to decide whether the query loads
+                        the other models, which join the volume model in
+                        the database. Currently, the False value for this
+                        parameter is specially for the case of updating
+                        database during volume migration
+    :returns: updated query or None
+    """
+    if not joined_load:
+        return model_query(context, models.Volume, session=session,
+                           project_only=project_only)
     if is_admin_context(context):
         return model_query(context, models.Volume, session=session,
                            project_only=project_only).\
@@ -1354,11 +1372,12 @@ def _volume_get_query(context, session=None, project_only=False):
 
 
 @require_context
-def _volume_get(context, volume_id, session=None):
-    result = _volume_get_query(context, session=session, project_only=True).\
-        options(joinedload('volume_type.extra_specs')).\
-        filter_by(id=volume_id).\
-        first()
+def _volume_get(context, volume_id, session=None, joined_load=True):
+    result = _volume_get_query(context, session=session, project_only=True,
+                               joined_load=joined_load)
+    if joined_load:
+        result = result.options(joinedload('volume_type.extra_specs'))
+    result = result.filter_by(id=volume_id).first()
 
     if not result:
         raise exception.VolumeNotFound(volume_id=volume_id)
@@ -2243,6 +2262,8 @@ def snapshot_get_all_by_project(context, project_id, filters=None, marker=None,
     # No snapshots would match, return empty list
     if not query:
         return []
+
+    query = query.options(joinedload('snapshot_metadata'))
     return query.all()
 
 
@@ -2279,6 +2300,7 @@ def snapshot_get_active_by_window(context, begin, end=None, project_id=None):
     query = query.filter(or_(models.Snapshot.deleted_at == None,  # noqa
                              models.Snapshot.deleted_at > begin))
     query = query.options(joinedload(models.Snapshot.volume))
+    query = query.options(joinedload('snapshot_metadata'))
     if end:
         query = query.filter(models.Snapshot.created_at < end)
     if project_id:
@@ -3254,6 +3276,17 @@ def volume_glance_metadata_get_all(context):
     """Return the Glance metadata for all volumes."""
 
     return _volume_glance_metadata_get_all(context)
+
+
+@require_context
+def volume_glance_metadata_list_get(context, volume_id_list):
+    """Return the glance metadata for a volume list."""
+    query = model_query(context,
+                        models.VolumeGlanceMetadata,
+                        session=None)
+    query = query.filter(
+        models.VolumeGlanceMetadata.volume_id.in_(volume_id_list))
+    return query.all()
 
 
 @require_context

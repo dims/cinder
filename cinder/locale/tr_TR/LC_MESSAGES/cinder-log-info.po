@@ -7,19 +7,18 @@
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: cinder 8.0.0.dev113\n"
+"Project-Id-Version: cinder 8.0.0.dev66\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2015-10-08 06:23+0000\n"
+"POT-Creation-Date: 2015-10-22 06:07+0000\n"
 "PO-Revision-Date: 2015-09-16 08:22+0000\n"
 "Last-Translator: Andreas Jaeger <jaegerandi@gmail.com>\n"
-"Language-Team: Turkish (Turkey) (http://www.transifex.com/openstack/cinder/"
-"language/tr_TR/)\n"
+"Language-Team: Turkish (Turkey)\n"
 "Language: tr-TR\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.0\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
+"Generated-By: Babel 2.0\n"
 "X-Generator: Zanata 3.7.1\n"
 
 #, python-format
@@ -508,11 +507,6 @@ msgstr ""
 
 msgid "Create consistency group completed successfully."
 msgstr "Tutarlılık grubu oluşturma başarıyla tamamlandı."
-
-#, python-format
-msgid "Create consistency group from snapshot-%(snap)s completed successfully."
-msgstr ""
-"Anlık görüntü-%(snap)s den tutarlılık grubu oluşturma başarıyla tamamlandı."
 
 #, python-format
 msgid "Create export done from Volume %(volume_id)s."
@@ -1462,10 +1456,6 @@ msgstr "%s profili silindi."
 
 msgid "Promote volume replica completed successfully."
 msgstr "Mantıksal sürücü kopyasının terfisi başarıyla tamamlandı."
-
-#, python-format
-msgid "Protection domain name: %(domain_id)s."
-msgstr "Koruma alan adı: %(domain_id)s."
 
 #, python-format
 msgid "Protection domain name: %(domain_name)s."

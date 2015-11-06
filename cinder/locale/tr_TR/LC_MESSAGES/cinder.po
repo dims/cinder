@@ -7,14 +7,13 @@
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: cinder 8.0.0.dev113\n"
+"Project-Id-Version: cinder 8.0.0.dev112\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2015-10-08 06:23+0000\n"
+"POT-Creation-Date: 2015-11-04 06:05+0000\n"
 "PO-Revision-Date: 2015-09-16 08:16+0000\n"
 "Last-Translator: Andreas Jaeger <jaegerandi@gmail.com>\n"
 "Language: tr_TR\n"
-"Language-Team: Turkish (Turkey) (http://www.transifex.com/openstack/cinder/"
-"language/tr_TR/)\n"
+"Language-Team: Turkish (Turkey)\n"
 "Plural-Forms: nplurals=1; plural=0\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
@@ -1147,20 +1146,8 @@ msgstr "Mantıksal sürücü yapılandırılan hiçbir REST sunucuda silinemiyor
 msgid "Could not detach volume %(vol)s from device %(dev)s."
 msgstr " %(vol)s mantıksal sürücüsü %(dev)s aygıtından ayrılamadı."
 
-msgid ""
-"Could not determine which Swift endpoint to use. This can  either be set in "
-"the service catalog or with the  cinder.conf config option "
-"'backup_swift_url'."
-msgstr ""
-"Kullanılacak Swift uç noktası belirlenemedi. Bu  ya servis kataloğunda ya "
-"da   cinder.conf yapılandırma seçeneği 'backup_swift_url' ile ayarlanabilir."
-
 msgid "Could not extend volume on any configured REST server."
 msgstr "Mantıksal sürücü yapılandırılan hiçbir REST sunucuda büyütülemiyor."
-
-#, python-format
-msgid "Could not find ACL %(acl)s in target %(target)s"
-msgstr "Hedefte %(target)s ACL %(acl)s bulunamadı"
 
 #, python-format
 msgid "Could not find GPFS cluster id: %s."
@@ -3808,6 +3795,10 @@ msgid "Linked clone of source volume not supported in state: %s."
 msgstr ""
 "Kaynak mantıksal sürücüsünün bağlantılı klonu bu durumda desteklenmiyor: %s."
 
+#, python-format
+msgid "Login error, reason is: %s."
+msgstr "Giriş hatası, sebep: %s."
+
 msgid ""
 "Lookup service not configured. Config option for fc_san_lookup_service needs "
 "to specify a concrete implementation of the lookup service."
@@ -3915,16 +3906,6 @@ msgstr ""
 #, python-format
 msgid "May specify only one of %s"
 msgstr "%s'nin sadece biri belirtilebilir"
-
-msgid "Message objects do not support addition."
-msgstr "İleti nesneleri eklemeyi desteklemez."
-
-msgid ""
-"Message objects do not support str() because they may contain non-ascii "
-"characters. Please use unicode() or translate() instead."
-msgstr ""
-"İleti nesneleri str() desteklemez çünkü ascii olmayan karakterler "
-"içermeyebilirler. Lütfen bunun yerine unicode() ya da translate() kullanın."
 
 msgid "Metadata backup already exists for this volume"
 msgstr "Bu mantıksal sürücü için metadata yedeği zaten var"
@@ -5083,9 +5064,6 @@ msgstr "Belirtilen %s etiketine sahip anlık görüntü grubu bulunamadı."
 msgid "Specify a password or private_key"
 msgstr "Bir parola ya da private_key belirtin"
 
-msgid "Specify either volume type name and/or description."
-msgstr "Ya mantıksal sürücü tür adı ve/ya da tanımlaması belirtin."
-
 msgid "Specify san_password or san_private_key"
 msgstr "san_password veya san_private_key belirtin"
 
@@ -6026,9 +6004,6 @@ msgstr "Güncelleme saati"
 
 msgid "Upload to glance of attached volume is not supported."
 msgstr "Eklenti mantıksal sürücüsü glance'ine yükleme desteklenmiyor."
-
-msgid "Use of empty request context is deprecated"
-msgstr "Boş istek içeriği kullanımı önerilmiyor"
 
 msgid "User ID"
 msgstr "Kullanıcı ID"
