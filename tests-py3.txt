@@ -62,6 +62,7 @@ cinder.tests.unit.test_evaluator
 cinder.tests.unit.test_exception
 cinder.tests.unit.test_glusterfs
 cinder.tests.unit.test_gpfs
+cinder.tests.unit.test_hacking
 cinder.tests.unit.test_hitachi_hbsd_horcm_fc
 cinder.tests.unit.test_hitachi_hbsd_snm2_fc
 cinder.tests.unit.test_hitachi_hbsd_snm2_iscsi
@@ -103,6 +104,7 @@ cinder.tests.unit.test_ssh_utils
 cinder.tests.unit.test_test
 cinder.tests.unit.test_test_utils
 cinder.tests.unit.test_tintri
+cinder.tests.unit.test_utils
 cinder.tests.unit.test_v6000_common
 cinder.tests.unit.test_v6000_fcp
 cinder.tests.unit.test_v6000_iscsi

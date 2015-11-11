@@ -184,6 +184,7 @@ class CheckForStrUnicodeExc(BaseASTChecker):
         self.name = []
         self.already_checked = []
 
+    # Python 2
     def visit_TryExcept(self, node):
         for handler in node.handlers:
             if handler.name:
@@ -192,6 +193,15 @@ class CheckForStrUnicodeExc(BaseASTChecker):
                 self.name = self.name[:-1]
             else:
                 super(CheckForStrUnicodeExc, self).generic_visit(node)
+
+    # Python 3
+    def visit_ExceptHandler(self, node):
+        if node.name:
+            self.name.append(node.name)
+            super(CheckForStrUnicodeExc, self).generic_visit(node)
+            self.name = self.name[:-1]
+        else:
+            super(CheckForStrUnicodeExc, self).generic_visit(node)
 
     def visit_Call(self, node):
         if self._check_call_names(node, ['str', 'unicode']):
@@ -304,6 +314,9 @@ class CheckOptRegistrationArgs(BaseASTChecker):
         else:  # could be Subscript, Call or many more
             return None
 
+    def _is_list_or_tuple(self, obj):
+        return isinstance(obj, ast.List) or isinstance(obj, ast.Tuple)
+
     def visit_Call(self, node):
         """Look for the register_opt/register_opts calls."""
         # extract the obj_name and method_name
@@ -319,7 +332,6 @@ class CheckOptRegistrationArgs(BaseASTChecker):
                 return (super(CheckOptRegistrationArgs,
                               self).generic_visit(node))
 
-            # argument should be a list with register_opts()
             if len(node.args) > 0:
                 argument_name = self._find_name(node.args[0])
                 if argument_name:
@@ -335,12 +347,10 @@ class CheckOptRegistrationArgs(BaseASTChecker):
                     # passing in a variable referencing the options being
                     # registered.
                     if (method_name == self.singular_method and
-                            (isinstance(node.args[0], ast.List)) or
-                            isinstance(node.args[0], ast.Tuple)):
+                            self._is_list_or_tuple(node.args[0])):
                         self.add_error(node.args[0])
-                    elif (method_name == self.plural_method and
-                            (not isinstance(node.args[0], ast.List)) or
-                            isinstance(node.args[0], ast.Tuple)):
+                    elif (method_name == self.plural_method and not
+                            self._is_list_or_tuple(node.args[0])):
                         self.add_error(node.args[0])
 
         return super(CheckOptRegistrationArgs, self).generic_visit(node)

@@ -26,3 +26,4 @@ testscenarios>=0.4
 os-testr>=0.4.1
 tempest-lib>=0.10.0
 bandit>=0.13.2
+reno>=0.1.1  # Apache2
