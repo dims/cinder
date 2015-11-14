@@ -107,7 +107,8 @@ def check_policy(context, action, target_obj=None):
 
     if isinstance(target_obj, objects_base.CinderObject):
         # Turn object into dict so target.update can work
-        target.update(target_obj.obj_to_primitive() or {})
+        target.update(
+            target_obj.obj_to_primitive()['versioned_object.data'] or {})
     else:
         target.update(target_obj or {})
 
@@ -310,7 +311,7 @@ class API(base.Base):
             'snapshot': snapshot,
             'image_id': image_id,
             'raw_volume_type': volume_type,
-            'metadata': metadata,
+            'metadata': metadata or {},
             'raw_availability_zone': availability_zone,
             'source_volume': source_volume,
             'scheduler_hints': scheduler_hints,
@@ -371,7 +372,7 @@ class API(base.Base):
                 reservations = None
                 LOG.exception(_LE("Failed to update quota while "
                                   "deleting volume."))
-            self.db.volume_destroy(context.elevated(), volume_id)
+            volume.destroy()
 
             if reservations:
                 QUOTAS.commit(context, reservations, project_id=project_id)
@@ -439,15 +440,13 @@ class API(base.Base):
                 msg = _("Unable to delete encrypted volume: %s.") % e.msg
                 raise exception.InvalidVolume(reason=msg)
 
-        now = timeutils.utcnow()
-        vref = self.db.volume_update(context,
-                                     volume_id,
-                                     {'status': 'deleting',
-                                      'terminated_at': now})
+        volume.status = 'deleting'
+        volume.terminated_at = timeutils.utcnow()
+        volume.save()
 
         self.volume_rpcapi.delete_volume(context, volume, unmanage_only)
         LOG.info(_LI("Delete volume request issued successfully."),
-                 resource=vref)
+                 resource=volume)
 
     @wrap_check_policy
     def update(self, context, volume, fields):
@@ -457,19 +456,26 @@ class API(base.Base):
             msg = _("The volume cannot be updated during maintenance.")
             raise exception.InvalidVolume(reason=msg)
 
-        vref = self.db.volume_update(context, volume['id'], fields)
-        LOG.info(_LI("Volume updated successfully."), resource=vref)
+        # NOTE(thangp): Update is called by various APIs, some of which are
+        # not yet using oslo_versionedobjects.  We need to handle the case
+        # where volume is either a dict or a oslo_versionedobject.
+        if isinstance(volume, objects_base.CinderObject):
+            volume.update(fields)
+            volume.save()
+            LOG.info(_LI("Volume updated successfully."), resource=volume)
+        else:
+            vref = self.db.volume_update(context, volume['id'], fields)
+            LOG.info(_LI("Volume updated successfully."), resource=vref)
 
     def get(self, context, volume_id, viewable_admin_meta=False):
-        rv = self.db.volume_get(context, volume_id)
-
-        volume = dict(rv)
+        volume = objects.Volume.get_by_id(context, volume_id)
 
         if viewable_admin_meta:
             ctxt = context.elevated()
             admin_metadata = self.db.volume_admin_metadata_get(ctxt,
                                                                volume_id)
-            volume['volume_admin_metadata'] = admin_metadata
+            volume.admin_metadata = admin_metadata
+            volume.obj_reset_changes()
 
         try:
             check_policy(context, 'get', volume)
@@ -477,7 +483,7 @@ class API(base.Base):
             # raise VolumeNotFound instead to make sure Cinder behaves
             # as it used to
             raise exception.VolumeNotFound(volume_id=volume_id)
-        LOG.info(_LI("Volume info retrieved successfully."), resource=rv)
+        LOG.info(_LI("Volume info retrieved successfully."), resource=volume)
         return volume
 
     def get_all(self, context, marker=None, limit=None, sort_keys=None,
@@ -513,21 +519,18 @@ class API(base.Base):
         if context.is_admin and allTenants:
             # Need to remove all_tenants to pass the filtering below.
             del filters['all_tenants']
-            volumes = self.db.volume_get_all(context, marker, limit,
-                                             sort_keys=sort_keys,
-                                             sort_dirs=sort_dirs,
-                                             filters=filters,
-                                             offset=offset)
+            volumes = objects.VolumeList.get_all(context, marker, limit,
+                                                 sort_keys=sort_keys,
+                                                 sort_dirs=sort_dirs,
+                                                 filters=filters,
+                                                 offset=offset)
         else:
             if viewable_admin_meta:
                 context = context.elevated()
-            volumes = self.db.volume_get_all_by_project(context,
-                                                        context.project_id,
-                                                        marker, limit,
-                                                        sort_keys=sort_keys,
-                                                        sort_dirs=sort_dirs,
-                                                        filters=filters,
-                                                        offset=offset)
+            volumes = objects.VolumeList.get_all_by_project(
+                context, context.project_id, marker, limit,
+                sort_keys=sort_keys, sort_dirs=sort_dirs, filters=filters,
+                offset=offset)
 
         LOG.info(_LI("Get all volumes completed successfully."))
         return volumes
@@ -544,9 +547,9 @@ class API(base.Base):
 
     def get_volume(self, context, volume_id):
         check_policy(context, 'get_volume')
-        vref = self.db.volume_get(context, volume_id)
-        LOG.info(_LI("Volume retrieved successfully."), resource=vref)
-        return dict(vref)
+        volume = objects.Volume.get_by_id(context, volume_id)
+        LOG.info(_LI("Volume retrieved successfully."), resource=volume)
+        return volume
 
     def get_all_snapshots(self, context, search_opts=None, marker=None,
                           limit=None, sort_keys=None, sort_dirs=None,
@@ -1441,18 +1444,18 @@ class API(base.Base):
     @wrap_check_policy
     def retype(self, context, volume, new_type, migration_policy=None):
         """Attempt to modify the type associated with an existing volume."""
-        if volume['status'] not in ['available', 'in-use']:
+        if volume.status not in ['available', 'in-use']:
             msg = _('Unable to update type due to incorrect status: '
                     '%(vol_status)s on volume: %(vol_id)s. Volume status '
                     'must be available or '
-                    'in-use.') % {'vol_status': volume['status'],
-                                  'vol_id': volume['id']}
+                    'in-use.') % {'vol_status': volume.status,
+                                  'vol_id': volume.id}
             LOG.error(msg)
             raise exception.InvalidVolume(reason=msg)
 
         if self._is_volume_migrating(volume):
             msg = (_("Volume %s is already part of an active migration.")
-                   % volume['id'])
+                   % volume.id)
             LOG.error(msg)
             raise exception.InvalidVolume(reason=msg)
 
@@ -1462,8 +1465,7 @@ class API(base.Base):
             LOG.error(msg)
             raise exception.InvalidInput(reason=msg)
 
-        cg_id = volume.get('consistencygroup_id', None)
-        if cg_id:
+        if volume.consistencygroup_id:
             msg = _("Volume must not be part of a consistency group.")
             LOG.error(msg)
             raise exception.InvalidVolume(reason=msg)
@@ -1485,16 +1487,16 @@ class API(base.Base):
         vol_type_qos_id = vol_type['qos_specs_id']
 
         old_vol_type = None
-        old_vol_type_id = volume['volume_type_id']
+        old_vol_type_id = volume.volume_type_id
         old_vol_type_qos_id = None
 
         # Error if the original and new type are the same
-        if volume['volume_type_id'] == vol_type_id:
+        if volume.volume_type_id == vol_type_id:
             msg = _('New volume_type same as original: %s.') % new_type
             LOG.error(msg)
             raise exception.InvalidInput(reason=msg)
 
-        if volume['volume_type_id']:
+        if volume.volume_type_id:
             old_vol_type = volume_types.get_volume_type(
                 context, old_vol_type_id)
             old_vol_type_qos_id = old_vol_type['qos_specs_id']
@@ -1511,14 +1513,14 @@ class API(base.Base):
         # We don't support changing QoS at the front-end yet for in-use volumes
         # TODO(avishay): Call Nova to change QoS setting (libvirt has support
         # - virDomainSetBlockIoTune() - Nova does not have support yet).
-        if (volume['status'] != 'available' and
+        if (volume.status != 'available' and
                 old_vol_type_qos_id != vol_type_qos_id):
             for qos_id in [old_vol_type_qos_id, vol_type_qos_id]:
                 if qos_id:
                     specs = qos_specs.get_qos_specs(context.elevated(), qos_id)
                     if specs['consumer'] != 'back-end':
                         msg = _('Retype cannot change front-end qos specs for '
-                                'in-use volume: %s.') % volume['id']
+                                'in-use volume: %s.') % volume.id
                         raise exception.InvalidInput(reason=msg)
 
         # We're checking here in so that we can report any quota issues as
@@ -1528,17 +1530,17 @@ class API(base.Base):
                                                                vol_type_id)
 
         self.update(context, volume, {'status': 'retyping',
-                                      'previous_status': volume['status']})
+                                      'previous_status': volume.status})
 
         request_spec = {'volume_properties': volume,
-                        'volume_id': volume['id'],
+                        'volume_id': volume.id,
                         'volume_type': vol_type,
                         'migration_policy': migration_policy,
                         'quota_reservations': reservations}
 
-        self.scheduler_rpcapi.retype(context, CONF.volume_topic, volume['id'],
+        self.scheduler_rpcapi.retype(context, CONF.volume_topic, volume.id,
                                      request_spec=request_spec,
-                                     filter_properties={})
+                                     filter_properties={}, volume=volume)
         LOG.info(_LI("Retype volume request issued successfully."),
                  resource=volume)
 

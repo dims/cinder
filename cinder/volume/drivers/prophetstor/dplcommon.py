@@ -887,7 +887,7 @@ class DPLCOMMONDriver(driver.ConsistencyGroupVD, driver.ExtendVD,
                                                     'reason': six.text_type(e)}
             raise exception.VolumeBackendAPIException(data=msg)
 
-    def delete_consistencygroup(self, context, group):
+    def delete_consistencygroup(self, context, group, volumes):
         """Delete a consistency group."""
         ret = 0
         volumes = self.db.volume_get_all_by_group(
@@ -916,7 +916,7 @@ class DPLCOMMONDriver(driver.ConsistencyGroupVD, driver.ExtendVD,
             model_update['status'] = 'deleted'
         return model_update, volumes
 
-    def create_cgsnapshot(self, context, cgsnapshot):
+    def create_cgsnapshot(self, context, cgsnapshot, snapshots):
         """Creates a cgsnapshot."""
         snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
             context, cgsnapshot['id'])
@@ -943,7 +943,7 @@ class DPLCOMMONDriver(driver.ConsistencyGroupVD, driver.ExtendVD,
 
         return model_update, snapshots
 
-    def delete_cgsnapshot(self, context, cgsnapshot):
+    def delete_cgsnapshot(self, context, cgsnapshot, snapshots):
         """Deletes a cgsnapshot."""
         snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
             context, cgsnapshot['id'])
@@ -993,7 +993,7 @@ class DPLCOMMONDriver(driver.ConsistencyGroupVD, driver.ExtendVD,
                 if self._conver_uuid2hex(vid) in group_members:
                     continue
                 self._join_volume_group(volume, cgid)
-        except exception as e:
+        except Exception as e:
             msg = _("Fexvisor failed to join the volume %(vol)s in the "
                     "group %(group)s due to "
                     "%(ret)s.") % {"vol": vid, "group": cgid,
@@ -1005,7 +1005,7 @@ class DPLCOMMONDriver(driver.ConsistencyGroupVD, driver.ExtendVD,
                 vid = volume['id']
                 if self._conver_uuid2hex(vid) in group_members:
                     self._leave_volume_group(volume, cgid)
-        except exception as e:
+        except Exception as e:
             msg = _("Fexvisor failed to remove the volume %(vol)s in the "
                     "group %(group)s due to "
                     "%(ret)s.") % {"vol": vid, "group": cgid,

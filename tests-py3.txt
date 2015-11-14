@@ -86,6 +86,7 @@ cinder.tests.unit.test_netapp_nfs
 cinder.tests.unit.test_netapp_ssc
 cinder.tests.unit.test_nfs
 cinder.tests.unit.test_nimble
+cinder.tests.unit.test_prophetstor_dpl
 cinder.tests.unit.test_pure
 cinder.tests.unit.test_qos_specs
 cinder.tests.unit.test_quobyte
@@ -122,6 +123,8 @@ cinder.tests.unit.test_volume_transfer
 cinder.tests.unit.test_volume_types
 cinder.tests.unit.test_volume_types_extra_specs
 cinder.tests.unit.test_volume_utils
+cinder.tests.unit.test_vzstorage
+cinder.tests.unit.test_zfssa
 cinder.tests.unit.volume.drivers.emc.scaleio
 cinder.tests.unit.volume.flows.test_create_volume_flow
 cinder.tests.unit.windows.test_smbfs
