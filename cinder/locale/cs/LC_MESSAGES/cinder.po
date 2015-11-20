@@ -9,10 +9,10 @@
 # Zbyněk Schwarz <zbynek.schwarz@gmail.com>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: cinder 8.0.0.dev220\n"
+"Project-Id-Version: cinder 8.0.0.dev260\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2015-11-14 06:38+0000\n"
-"PO-Revision-Date: 2015-11-13 05:10+0000\n"
+"POT-Creation-Date: 2015-11-20 06:38+0000\n"
+"PO-Revision-Date: 2015-11-19 08:32+0000\n"
 "Last-Translator: Zbyněk Schwarz <zbynek.schwarz@gmail.com>\n"
 "Language: cs\n"
 "Language-Team: Czech\n"
@@ -1547,6 +1547,10 @@ msgstr "Chyba při vytváření svazku: Protože %s."
 msgid "Create volume failed."
 msgstr "Vytvoření svazku selhalo."
 
+msgid "Creating a consistency group from a source is not currently supported."
+msgstr ""
+"Vytváření skupiny jednotnosti ze zdroje není v současnosti podporováno."
+
 #, python-format
 msgid ""
 "Creating and activating zone set failed: (Zone set=%(cfg_name)s error="
@@ -2499,6 +2503,10 @@ msgstr "Chyba při propagování druhotného svazku na hlavní"
 #, python-format
 msgid "Error removing volume %(vol)s. %(error)s."
 msgstr "Chyba při mazání svazku: %(vol)s. %(error)s."
+
+#, python-format
+msgid "Error renaming volume %(vol)s: %(err)s."
+msgstr "Chyba při přejmenování svazku %(vol)s: %(err)s."
 
 msgid "Error retrieving volume size"
 msgstr "Chyba při získávání velikosti svazku"
@@ -3950,8 +3958,8 @@ msgstr "Získány špatné informace o cestě z DRBDmanage! (%s)"
 msgid "HBSD error occurs."
 msgstr "Objevena chyba HBSD."
 
-msgid "HPLeftHand url not found"
-msgstr "HPLeftHand URL nenalezena"
+msgid "HPELeftHand url not found"
+msgstr "HPELeftHand URL nenalezena"
 
 #, python-format
 msgid ""
@@ -4219,11 +4227,11 @@ msgstr ""
 
 #, python-format
 msgid ""
-"Invalid HPLeftHand API version found: %(found)s. Version %(minimum)s or "
+"Invalid HPELeftHand API version found: %(found)s. Version %(minimum)s or "
 "greater required for manage/unmanage support."
 msgstr ""
-"Nalezena neplatná verze API HPLeftHand: %(found)s. Pro podporu spravování je "
-"vyžadována verze %(minimum)s nebo vyšší."
+"Nalezena neplatná verze API HPELeftHand: %(found)s. Pro podporu spravování "
+"je vyžadována verze %(minimum)s nebo vyšší."
 
 #, python-format
 msgid "Invalid IP address format: '%s'"
@@ -4344,11 +4352,13 @@ msgstr ""
 
 #, python-format
 msgid ""
-"Invalid hplefthandclient version found (%(found)s). Version %(minimum)s or "
-"greater required."
+"Invalid hpelefthandclient version found (%(found)s). Version %(minimum)s or "
+"greater required. Run 'pip install --upgrade python-lefthandclient' to "
+"upgrade the hpelefthandclient."
 msgstr ""
-"Nalezena neplatná verze hplefthandclient (%(found)s). Je vyžadována verze "
-"%(minimum)s a vyšší."
+"Nalezena neplatná verze hpelefthandclient (%(found)s). Je vyžadována verze "
+"%(minimum)s a vyšší. Spusťte \"pip install --upgrade python-lefthandclient\" "
+"pro aktualizaci klienta."
 
 #, python-format
 msgid "Invalid image href %(image_href)s."
@@ -5673,8 +5683,8 @@ msgstr ""
 "RBD operace porovnání selhala - (ret=%(ret)s chybový výstup=%(stderr)s)"
 
 #, python-format
-msgid "REST %(proxy_ver)s hplefthandclient %(rest_ver)s"
-msgstr "REST %(proxy_ver)s, hplefthandclient %(rest_ver)s"
+msgid "REST %(proxy_ver)s hpelefthandclient %(rest_ver)s"
+msgstr "REST %(proxy_ver)s, hpelefthandclient %(rest_ver)s"
 
 msgid "REST server IP must by specified."
 msgstr "IP serveru REST musí být zadáno."
@@ -6290,6 +6300,10 @@ msgid "Synchronizing secondary volume to primary failed."
 msgstr "Synchronizace druhotného svazku na hlavní selhala."
 
 #, python-format
+msgid "System %(id)s found with bad password status - %(pass_status)s."
+msgstr "Systém %(id)s nalezen se stavem špatného hesla - %(pass_status)s."
+
+#, python-format
 msgid "System %(id)s found with bad status - %(status)s."
 msgstr "Byl nalezen systém %(id)s se špatným stavem - %(status)s."
 
@@ -6559,6 +6573,13 @@ msgstr "Zadaný virtuální disk je mapován k hostiteli."
 
 msgid "The specified volume is mapped to a host."
 msgstr "Zadaný svazek je namapován k hostiteli."
+
+#, python-format
+msgid ""
+"The storage array password for %s is incorrect, please update the configured "
+"password."
+msgstr ""
+"Heslo pole úložiště pro %s není správné, prosím aktualizujte nastavené heslo."
 
 #, python-format
 msgid "The storage backend can be used. (config_group: %(config_group)s)"

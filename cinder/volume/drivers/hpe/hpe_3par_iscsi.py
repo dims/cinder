@@ -100,10 +100,12 @@ class HPE3PARISCSIDriver(driver.TransferVD,
         2.0.22 - Update driver to use ABC metaclasses
         2.0.23 - Added update_migrated_volume. bug # 1492023
         3.0.0 - Rebranded HP to HPE.
+        3.0.1 - Python 3 support
+        3.0.2 - Remove db access for consistency groups
 
     """
 
-    VERSION = "3.0.0"
+    VERSION = "3.0.2"
 
     def __init__(self, *args, **kwargs):
         super(HPE3PARISCSIDriver, self).__init__(*args, **kwargs)
@@ -719,7 +721,7 @@ class HPE3PARISCSIDriver(driver.TransferVD,
                     nsp_counts[nsp] = nsp_counts[nsp] + 1
 
         # identify key (nsp) of least used nsp
-        current_smallest_count = sys.maxint
+        current_smallest_count = sys.maxsize
         for (nsp, count) in nsp_counts.items():
             if count < current_smallest_count:
                 current_least_used_nsp = nsp
@@ -755,7 +757,7 @@ class HPE3PARISCSIDriver(driver.TransferVD,
     def delete_consistencygroup(self, context, group, volumes):
         common = self._login()
         try:
-            return common.delete_consistencygroup(context, group)
+            return common.delete_consistencygroup(context, group, volumes)
         finally:
             self._logout(common)
 
@@ -771,14 +773,14 @@ class HPE3PARISCSIDriver(driver.TransferVD,
     def create_cgsnapshot(self, context, cgsnapshot, snapshots):
         common = self._login()
         try:
-            return common.create_cgsnapshot(context, cgsnapshot)
+            return common.create_cgsnapshot(context, cgsnapshot, snapshots)
         finally:
             self._logout(common)
 
     def delete_cgsnapshot(self, context, cgsnapshot, snapshots):
         common = self._login()
         try:
-            return common.delete_cgsnapshot(context, cgsnapshot)
+            return common.delete_cgsnapshot(context, cgsnapshot, snapshots)
         finally:
             self._logout(common)
 

@@ -1,4 +1,4 @@
-#    (c) Copyright 2014-2015 Hewlett-Packard Development Company, L.P.
+#    (c) Copyright 2014-2015 Hewlett Packard Enterprise Development LP
 #    All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -13,7 +13,26 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-"""HP LeftHand SAN ISCSI REST Proxy."""
+"""HPE LeftHand SAN ISCSI REST Proxy.
+
+Volume driver for HPE LeftHand Storage array.
+This driver requires 11.5 or greater firmware on the LeftHand array, using
+the 2.0 or greater version of the hpelefthandclient.
+
+You will need to install the python hpelefthandclient module.
+sudo pip install python-lefthandclient
+
+Set the following in the cinder.conf file to enable the
+LeftHand iSCSI REST Driver along with the required flags:
+
+volume_driver=cinder.volume.drivers.hpe.hpe_lefthand_iscsi.
+    HPELeftHandISCSIDriver
+
+It also requires the setting of hpelefthand_api_url, hpelefthand_username,
+hpelefthand_password for credentials to talk to the REST service on the
+LeftHand array.
+
+"""
 
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -24,7 +43,6 @@ from oslo_utils import units
 from cinder import context
 from cinder import exception
 from cinder.i18n import _, _LE, _LI, _LW
-from cinder import objects
 from cinder.volume import driver
 from cinder.volume import utils
 from cinder.volume import volume_types
@@ -36,41 +54,53 @@ import re
 
 LOG = logging.getLogger(__name__)
 
-hplefthandclient = importutils.try_import("hplefthandclient")
-if hplefthandclient:
-    from hplefthandclient import client as hp_lh_client
-    from hplefthandclient import exceptions as hpexceptions
+hpelefthandclient = importutils.try_import("hpelefthandclient")
+if hpelefthandclient:
+    from hpelefthandclient import client as hpe_lh_client
+    from hpelefthandclient import exceptions as hpeexceptions
 
-hplefthand_opts = [
-    cfg.StrOpt('hplefthand_api_url',
-               help="HP LeftHand WSAPI Server Url like "
-                    "https://<LeftHand ip>:8081/lhos"),
-    cfg.StrOpt('hplefthand_username',
-               help="HP LeftHand Super user username"),
-    cfg.StrOpt('hplefthand_password',
-               help="HP LeftHand Super user password",
-               secret=True),
-    cfg.StrOpt('hplefthand_clustername',
-               help="HP LeftHand cluster name"),
-    cfg.BoolOpt('hplefthand_iscsi_chap_enabled',
+hpelefthand_opts = [
+    cfg.StrOpt('hpelefthand_api_url',
+               default=None,
+               help="HPE LeftHand WSAPI Server Url like "
+                    "https://<LeftHand ip>:8081/lhos",
+               deprecated_name='hplefthand_api_url'),
+    cfg.StrOpt('hpelefthand_username',
+               default=None,
+               help="HPE LeftHand Super user username",
+               deprecated_name='hplefthand_username'),
+    cfg.StrOpt('hpelefthand_password',
+               default=None,
+               help="HPE LeftHand Super user password",
+               secret=True,
+               deprecated_name='hplefthand_password'),
+    cfg.StrOpt('hpelefthand_clustername',
+               default=None,
+               help="HPE LeftHand cluster name",
+               deprecated_name='hplefthand_clustername'),
+    cfg.BoolOpt('hpelefthand_iscsi_chap_enabled',
                 default=False,
                 help='Configure CHAP authentication for iSCSI connections '
-                '(Default: Disabled)'),
-    cfg.BoolOpt('hplefthand_debug',
+                '(Default: Disabled)',
+                deprecated_name='hplefthand_iscsi_chap_enabled'),
+    cfg.BoolOpt('hpelefthand_debug',
                 default=False,
-                help="Enable HTTP debugging to LeftHand"),
+                help="Enable HTTP debugging to LeftHand",
+                deprecated_name='hplefthand_debug'),
 
 ]
 
 CONF = cfg.CONF
-CONF.register_opts(hplefthand_opts)
+CONF.register_opts(hpelefthand_opts)
 
 MIN_API_VERSION = "1.1"
-MIN_CLIENT_VERSION = '1.0.4'
-MIN_CG_CLIENT_VERSION = "1.0.6"
+MIN_CLIENT_VERSION = '2.0.0'
 
 # map the extra spec key to the REST client option key
 extra_specs_key_map = {
+    'hpelh:provisioning': 'isThinProvisioned',
+    'hpelh:ao': 'isAdaptiveOptimizationEnabled',
+    'hpelh:data_pl': 'dataProtectionLevel',
     'hplh:provisioning': 'isThinProvisioned',
     'hplh:ao': 'isAdaptiveOptimizationEnabled',
     'hplh:data_pl': 'dataProtectionLevel',
@@ -85,8 +115,8 @@ extra_specs_value_map = {
 }
 
 
-class HPLeftHandISCSIDriver(driver.ISCSIDriver):
-    """Executes REST commands relating to HP/LeftHand SAN ISCSI volumes.
+class HPELeftHandISCSIDriver(driver.ISCSIDriver):
+    """Executes REST commands relating to HPE/LeftHand SAN ISCSI volumes.
 
     Version history:
         1.0.0 - Initial REST iSCSI proxy
@@ -108,17 +138,19 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         1.0.12 - Adds consistency group support
         1.0.13 - Added update_migrated_volume #1493546
         1.0.14 - Removed the old CLIQ based driver
+        2.0.0 - Rebranded HP to HPE
+        2.0.1 - Remove db access for consistency groups
     """
 
-    VERSION = "1.0.14"
+    VERSION = "2.0.1"
 
     device_stats = {}
 
     def __init__(self, *args, **kwargs):
-        super(HPLeftHandISCSIDriver, self).__init__(*args, **kwargs)
-        self.configuration.append_config_values(hplefthand_opts)
-        if not self.configuration.hplefthand_api_url:
-            raise exception.NotFound(_("HPLeftHand url not found"))
+        super(HPELeftHandISCSIDriver, self).__init__(*args, **kwargs)
+        self.configuration.append_config_values(hpelefthand_opts)
+        if not self.configuration.hpelefthand_api_url:
+            raise exception.NotFound(_("HPELeftHand url not found"))
 
         # blank is the only invalid character for cluster names
         # so we need to use it as a separator
@@ -128,21 +160,21 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
     def _login(self):
         client = self._create_client()
         try:
-            if self.configuration.hplefthand_debug:
+            if self.configuration.hpelefthand_debug:
                 client.debug_rest(True)
 
             client.login(
-                self.configuration.hplefthand_username,
-                self.configuration.hplefthand_password)
+                self.configuration.hpelefthand_username,
+                self.configuration.hpelefthand_password)
 
             cluster_info = client.getClusterByName(
-                self.configuration.hplefthand_clustername)
+                self.configuration.hpelefthand_clustername)
             self.cluster_id = cluster_info['id']
             virtual_ips = cluster_info['virtualIPAddresses']
             self.cluster_vip = virtual_ips[0]['ipV4Address']
 
             return client
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             raise exception.DriverNotInitialized(
                 _('LeftHand cluster not found'))
         except Exception as ex:
@@ -152,16 +184,18 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         client.logout()
 
     def _create_client(self):
-        return hp_lh_client.HPLeftHandClient(
-            self.configuration.hplefthand_api_url)
+        return hpe_lh_client.HPELeftHandClient(
+            self.configuration.hpelefthand_api_url)
 
     def do_setup(self, context):
         """Set up LeftHand client."""
-        if hplefthandclient.version < MIN_CLIENT_VERSION:
-            ex_msg = (_("Invalid hplefthandclient version found ("
+        if hpelefthandclient.version < MIN_CLIENT_VERSION:
+            ex_msg = (_("Invalid hpelefthandclient version found ("
                         "%(found)s). Version %(minimum)s or greater "
-                        "required.")
-                      % {'found': hplefthandclient.version,
+                        "required. Run 'pip install --upgrade "
+                        "python-lefthandclient' to upgrade the "
+                        "hpelefthandclient.")
+                      % {'found': hpelefthandclient.version,
                          'minimum': MIN_CLIENT_VERSION})
             LOG.error(ex_msg)
             raise exception.InvalidInput(reason=ex_msg)
@@ -172,10 +206,10 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         try:
             self.api_version = client.getApiVersion()
 
-            LOG.info(_LI("HPLeftHand API version %s"), self.api_version)
+            LOG.info(_LI("HPELeftHand API version %s"), self.api_version)
 
             if self.api_version < MIN_API_VERSION:
-                LOG.warning(_LW("HPLeftHand API is version %(current)s. "
+                LOG.warning(_LW("HPELeftHand API is version %(current)s. "
                                 "A minimum version of %(min)s is needed for "
                                 "manage/unmanage support."),
                             {'current': self.api_version,
@@ -184,9 +218,9 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
             self._logout(client)
 
     def get_version_string(self):
-        return (_('REST %(proxy_ver)s hplefthandclient %(rest_ver)s') % {
+        return (_('REST %(proxy_ver)s hpelefthandclient %(rest_ver)s') % {
             'proxy_ver': self.VERSION,
-            'rest_ver': hplefthandclient.get_version_string()})
+            'rest_ver': hpelefthandclient.get_version_string()})
 
     def create_volume(self, volume):
         """Creates a volume."""
@@ -215,7 +249,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
             if optional.get('isAdaptiveOptimizationEnabled'):
                 del optional['isAdaptiveOptimizationEnabled']
 
-            clusterName = self.configuration.hplefthand_clustername
+            clusterName = self.configuration.hpelefthand_clustername
             optional['clusterName'] = clusterName
 
             volume_info = client.createVolume(
@@ -235,7 +269,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         try:
             volume_info = client.getVolumeByName(volume['name'])
             client.deleteVolume(volume_info['id'])
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             LOG.error(_LE("Volume did not exist. It will not be deleted"))
         except Exception as ex:
             raise exception.VolumeBackendAPIException(ex)
@@ -272,16 +306,23 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
 
     def delete_consistencygroup(self, context, group, volumes):
         """Deletes a consistency group."""
-        # TODO(aorourke): Can't eliminate the DB calls here due to CG API.
-        # Will fix in M release
-        volumes = self.db.volume_get_all_by_group(context, group.id)
+        volume_model_updates = []
         for volume in volumes:
-            self.delete_volume(volume)
-            volume.status = 'deleted'
+            volume_update = {'id': volume.id}
+            try:
+                self.delete_volume(volume)
+                volume_update['status'] = 'deleted'
+            except Exception as ex:
+                LOG.error(_LE("There was an error deleting volume %(id)s: "
+                              "%(error)."),
+                          {'id': volume.id,
+                           'error': six.text_type(ex)})
+                volume_update['status'] = 'error'
+            volume_model_updates.append(volume_update)
 
         model_update = {'status': group.status}
 
-        return model_update, volumes
+        return model_update, volume_model_updates
 
     def update_consistencygroup(self, context, group,
                                 add_volumes=None, remove_volumes=None):
@@ -299,13 +340,9 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         """Creates a consistency group snapshot."""
         client = self._login()
         try:
-            # TODO(aorourke): Can't eliminate the DB calls here due to CG API.
-            # Will fix in M release
-            snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
-                context, cgsnapshot['id'])
-
             snap_set = []
-            snapshot_base_name = "snapshot-" + cgsnapshot['id']
+            snapshot_base_name = "snapshot-" + cgsnapshot.id
+            snapshot_model_updates = []
             for i, snapshot in enumerate(snapshots):
                 volume = snapshot.volume
                 volume_name = volume['name']
@@ -325,11 +362,13 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
                                    'volumeId': volume_id,
                                    'snapshotName': snapshot_name}
                 snap_set.append(snap_set_member)
-                snapshot.status = 'available'
+                snapshot_update = {'id': snapshot['id'],
+                                   'status': 'available'}
+                snapshot_model_updates.append(snapshot_update)
 
             source_volume_id = snap_set[0]['volumeId']
             optional = {'inheritAccess': True}
-            description = cgsnapshot.get('description', None)
+            description = cgsnapshot.description
             if description:
                 optional['description'] = description
 
@@ -349,46 +388,42 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
 
         model_update = {'status': 'available'}
 
-        return model_update, snapshots
+        return model_update, snapshot_model_updates
 
     def delete_cgsnapshot(self, context, cgsnapshot, snapshots):
         """Deletes a consistency group snapshot."""
 
         client = self._login()
-        try:
-            snap_name_base = "snapshot-" + cgsnapshot['id']
+        snap_name_base = "snapshot-" + cgsnapshot.id
 
-            # TODO(aorourke): Can't eliminate the DB calls here due to CG API.
-            # Will fix in M release
-            snapshots = objects.SnapshotList().get_all_for_cgsnapshot(
-                context, cgsnapshot['id'])
+        snapshot_model_updates = []
+        for i, snapshot in enumerate(snapshots):
+            snapshot_update = {'id': snapshot['id']}
+            try:
+                snap_name = snap_name_base + "-" + six.text_type(i)
+                snap_info = client.getSnapshotByName(snap_name)
+                client.deleteSnapshot(snap_info['id'])
+                snapshot_update['status'] = 'deleted'
+            except hpeexceptions.HTTPServerError as ex:
+                in_use_msg = ('cannot be deleted because it is a clone '
+                              'point')
+                if in_use_msg in ex.get_description():
+                    LOG.error(_LE("The snapshot cannot be deleted because "
+                                  "it is a clone point."))
+                snapshot_update['status'] = 'error'
+            except Exception as ex:
+                LOG.error(_LE("There was an error deleting snapshot %(id)s: "
+                              "%(error)."),
+                          {'id': snapshot['id'],
+                           'error': six.text_type(ex)})
+                snapshot_update['status'] = 'error'
+            snapshot_model_updates.append(snapshot_update)
 
-            for i, snapshot in enumerate(snapshots):
-                try:
-                    snap_name = snap_name_base + "-" + six.text_type(i)
-                    snap_info = client.getSnapshotByName(snap_name)
-                    client.deleteSnapshot(snap_info['id'])
-                except hpexceptions.HTTPNotFound:
-                    LOG.error(_LE("Snapshot did not exist. It will not be "
-                              "deleted."))
-                except hpexceptions.HTTPServerError as ex:
-                    in_use_msg = ('cannot be deleted because it is a clone '
-                                  'point')
-                    if in_use_msg in ex.get_description():
-                        raise exception.SnapshotIsBusy(snapshot_name=snap_name)
+        self._logout(client)
 
-                    raise exception.VolumeBackendAPIException(
-                        data=six.text_type(ex))
+        model_update = {'status': cgsnapshot.status}
 
-        except Exception as ex:
-            raise exception.VolumeBackendAPIException(
-                data=six.text_type(ex))
-        finally:
-            self._logout(client)
-
-        model_update = {'status': cgsnapshot['status']}
-
-        return model_update, snapshots
+        return model_update, snapshot_model_updates
 
     def create_snapshot(self, snapshot):
         """Creates a snapshot."""
@@ -411,9 +446,9 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         try:
             snap_info = client.getSnapshotByName(snapshot['name'])
             client.deleteSnapshot(snap_info['id'])
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             LOG.error(_LE("Snapshot did not exist. It will not be deleted"))
-        except hpexceptions.HTTPServerError as ex:
+        except hpeexceptions.HTTPServerError as ex:
             in_use_msg = 'cannot be deleted because it is a clone point'
             if in_use_msg in ex.get_description():
                 raise exception.SnapshotIsBusy(snapshot_name=snapshot['name'])
@@ -444,9 +479,9 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         data['reserved_percentage'] = (
             self.configuration.safe_get('reserved_percentage'))
         data['storage_protocol'] = 'iSCSI'
-        data['vendor_name'] = 'Hewlett-Packard'
+        data['vendor_name'] = 'Hewlett Packard Enterprise'
         data['location_info'] = (self.DRIVER_LOCATION % {
-            'cluster': self.configuration.hplefthand_clustername,
+            'cluster': self.configuration.hpelefthand_clustername,
             'vip': self.cluster_vip})
         data['thin_provisioning_support'] = True
         data['thick_provisioning_support'] = True
@@ -472,7 +507,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         total_volumes = 0
         provisioned_size = 0
         volumes = client.getVolumes(
-            cluster=self.configuration.hplefthand_clustername,
+            cluster=self.configuration.hpelefthand_clustername,
             fields=['members[id]', 'members[clusterName]', 'members[size]'])
         if volumes:
             total_volumes = volumes['total']
@@ -483,8 +518,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         data['total_volumes'] = total_volumes
         data['filter_function'] = self.get_filter_function()
         data['goodness_function'] = self.get_goodness_function()
-        if hplefthandclient.version >= MIN_CG_CLIENT_VERSION:
-            data['consistencygroup_support'] = True
+        data['consistencygroup_support'] = True
 
         self.device_stats = data
 
@@ -492,7 +526,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         """Assigns the volume to a server.
 
         Assign any created volume to a compute node/host so that it can be
-        used from that host. HP VSA requires a volume to be assigned
+        used from that host. HPE VSA requires a volume to be assigned
         to a server.
         """
         client = self._login()
@@ -595,6 +629,10 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         extra_specs_of_interest = {}
         for key, value in extra_specs.items():
             if key in valid_keys:
+                prefix = key.split(":")
+                if prefix[0] == "hplh":
+                    LOG.warning(_LW("The 'hplh' prefix is deprecated. Use "
+                                    "'hpelh' instead."))
                 extra_specs_of_interest[key] = value
         return extra_specs_of_interest
 
@@ -626,7 +664,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
 
     def _create_server(self, connector, client):
         server_info = None
-        chap_enabled = self.configuration.hplefthand_iscsi_chap_enabled
+        chap_enabled = self.configuration.hpelefthand_iscsi_chap_enabled
         try:
             server_info = client.getServerByName(connector['host'])
             chap_secret = server_info['chapTargetSecret']
@@ -637,7 +675,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
                 LOG.warning(_LW('CHAP is enabled, but server secret not '
                                 'configured on server %s'), connector['host'])
             return server_info
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             # server does not exist, so create one
             pass
 
@@ -705,7 +743,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
             if len(options) > 0:
                 client.modifyVolume(volume_info['id'], options)
             return True
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             raise exception.VolumeNotFound(volume_id=volume['id'])
         except Exception as ex:
             LOG.warning(_LW("%s"), ex)
@@ -739,7 +777,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
                   'cluster=%(cluster)s', {
                       'id': volume['id'],
                       'host': host,
-                      'cluster': self.configuration.hplefthand_clustername})
+                      'cluster': self.configuration.hpelefthand_clustername})
 
         false_ret = (False, None)
         if 'location_info' not in host['capabilities']:
@@ -765,7 +803,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
                              "management group."), volume['name'])
                 return false_ret
 
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             LOG.info(_LI("Cannot provide backend assisted migration for "
                          "volume: %s because cluster exists in different "
                          "management group."), volume['name'])
@@ -798,12 +836,12 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
 
             options = {'clusterName': cluster}
             client.modifyVolume(volume_info['id'], options)
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             LOG.info(_LI("Cannot provide backend assisted migration for "
                          "volume: %s because volume does not exist in this "
                          "management group."), volume['name'])
             return false_ret
-        except hpexceptions.HTTPServerError as ex:
+        except hpeexceptions.HTTPServerError as ex:
             LOG.error(_LE("Exception: %s"), ex)
             return false_ret
         finally:
@@ -865,7 +903,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         client = self._login()
         try:
             volume_info = client.getVolumeByName(target_vol_name)
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             err = (_("Virtual volume '%s' doesn't exist on array.") %
                    target_vol_name)
             LOG.error(err)
@@ -963,7 +1001,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
         client = self._login()
         try:
             volume_info = client.getVolumeByName(target_vol_name)
-        except hpexceptions.HTTPNotFound:
+        except hpeexceptions.HTTPNotFound:
             err = (_("Virtual volume '%s' doesn't exist on array.") %
                    target_vol_name)
             LOG.error(err)
@@ -1012,7 +1050,7 @@ class HPLeftHandISCSIDriver(driver.ISCSIDriver):
     def _check_api_version(self):
         """Checks that the API version is correct."""
         if (self.api_version < MIN_API_VERSION):
-            ex_msg = (_('Invalid HPLeftHand API version found: %(found)s. '
+            ex_msg = (_('Invalid HPELeftHand API version found: %(found)s. '
                         'Version %(minimum)s or greater required for '
                         'manage/unmanage support.')
                       % {'found': self.api_version,

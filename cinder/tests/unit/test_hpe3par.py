@@ -71,17 +71,15 @@ QUEUE_LENGTH = 'queue_length'
 AVG_BUSY_PERC = 'avg_busy_perc'
 
 
+class Comment(object):
+    def __init__(self, expected):
+        self.expected = expected
+
+    def __eq__(self, actual):
+        return (dict(ast.literal_eval(actual)) == self.expected)
+
+
 class HPE3PARBaseDriver(object):
-
-    class CommentMatcher(object):
-        def __init__(self, f, expect):
-            self.assertEqual = f
-            self.expect = expect
-
-        def __eq__(self, actual):
-            actual_as_dict = dict(ast.literal_eval(actual))
-            self.assertEqual(self.expect, actual_as_dict)
-            return True
 
     VOLUME_ID = 'd03338a9-9115-48a3-8dfc-35cdfcdc15a7'
     CLONE_ID = 'd03338a9-9115-48a3-8dfc-000000000000'
@@ -266,11 +264,6 @@ class HPE3PARBaseDriver(object):
          'numTDVVs': 1,
          'state': 1,
          'uuid': '29c214aa-62b9-41c8-b198-543f6cf24edf'}]
-
-    cgsnapshot = {'consistencygroup_id': CONSIS_GROUP_ID,
-                  'description': 'cgsnapshot',
-                  'id': CGSNAPSHOT_ID,
-                  'readOnly': False}
 
     TASK_DONE = 1
     TASK_ACTIVE = 2
@@ -510,6 +503,20 @@ class HPE3PARBaseDriver(object):
     standard_logout = [
         mock.call.logout()]
 
+    class fake_consistencygroup_object(object):
+        volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
+        name = 'cg_name'
+        cgsnapshot_id = None
+        host = 'fakehost@foo#OpenStackCPG'
+        id = '6044fedf-c889-4752-900f-2039d247a5df'
+        description = 'consistency group'
+
+    class fake_cgsnapshot_object(object):
+        consistencygroup_id = '6044fedf-c889-4752-900f-2039d247a5df'
+        description = 'cgsnapshot'
+        id = 'e91c5ed5-daee-4e84-8724-1c9e31e7a1f2'
+        readOnly = False
+
     def setup_configuration(self):
         configuration = mock.Mock()
         configuration.hpe3par_debug = False
@@ -545,6 +552,8 @@ class HPE3PARBaseDriver(object):
 
         # Configure the base constants, defaults etc...
         _m_client.configure_mock(**self.mock_client_conf)
+
+        _m_client.getWsApiVersion.return_value = self.wsapi_version_latest
 
         # If m_conf, drop those over the top of the base_conf.
         if m_conf is not None:
@@ -660,10 +669,11 @@ class HPE3PARBaseDriver(object):
                                '_create_client') as mock_create_client:
             mock_create_client.return_value = mock_client
             self.driver.create_volume(self.volume)
-            comment = (
-                '{"display_name": "Foo Volume", "type": "OpenStack",'
-                ' "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",'
-                ' "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"}')
+            comment = Comment({
+                "display_name": "Foo Volume",
+                "type": "OpenStack",
+                "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"})
             expected = [
                 mock.call.createVolume(
                     self.VOLUME_3PAR_NAME,
@@ -689,10 +699,11 @@ class HPE3PARBaseDriver(object):
             mock_create_client.return_value = mock_client
 
             return_model = self.driver.create_volume(self.volume_pool)
-            comment = (
-                '{"display_name": "Foo Volume", "type": "OpenStack",'
-                ' "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",'
-                ' "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"}')
+            comment = Comment({
+                "display_name": "Foo Volume",
+                "type": "OpenStack",
+                "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"})
             expected = [
                 mock.call.createVolume(
                     self.VOLUME_3PAR_NAME,
@@ -842,11 +853,14 @@ class HPE3PARBaseDriver(object):
             mock_create_client.return_value = mock_client
 
             return_model = self.driver.create_volume(self.volume_qos)
-            comment = (
-                '{"volume_type_name": "gold", "display_name": "Foo Volume"'
-                ', "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7'
-                '", "volume_type_id": "gold", "volume_id": "d03338a9-91'
-                '15-48a3-8dfc-35cdfcdc15a7", "qos": {}, "type": "OpenStack"}')
+            comment = Comment({
+                "volume_type_name": "gold",
+                "display_name": "Foo Volume",
+                "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "volume_type_id": "gold",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "qos": {},
+                "type": "OpenStack"})
 
             expected = [
                 mock.call.getCPG(HPE3PAR_CPG),
@@ -886,12 +900,14 @@ class HPE3PARBaseDriver(object):
             mock_create_client.return_value = mock_client
 
             return_model = self.driver.create_volume(self.volume_dedup)
-            comment = (
-                '{"volume_type_name": "dedup", "display_name": "Foo Volume"'
-                ', "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7'
-                '", "volume_type_id": "d03338a9-9115-48a3-8dfc-11111111111"'
-                ', "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"'
-                ', "qos": {}, "type": "OpenStack"}')
+            comment = Comment({
+                "volume_type_name": "dedup",
+                "display_name": "Foo Volume",
+                "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "volume_type_id": "d03338a9-9115-48a3-8dfc-11111111111",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "qos": {},
+                "type": "OpenStack"})
 
             expected = [
                 mock.call.getCPG(HPE3PAR_CPG),
@@ -935,13 +951,13 @@ class HPE3PARBaseDriver(object):
             mock_client.FLASH_CACHE_DISABLED = FLASH_CACHE_DISABLED
 
             return_model = self.driver.create_volume(self.volume_flash_cache)
-            comment = (
-                '{"volume_type_name": "flash-cache-on", '
-                '"display_name": "Foo Volume", '
-                '"name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7", '
-                '"volume_type_id": "d03338a9-9115-48a3-8dfc-22222222222", '
-                '"volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7", '
-                '"qos": {}, "type": "OpenStack"}')
+            comment = Comment({
+                "volume_type_name": "flash-cache-on",
+                "display_name": "Foo Volume",
+                "name": "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "volume_type_id": "d03338a9-9115-48a3-8dfc-22222222222",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+                "qos": {}, "type": "OpenStack"})
 
             expected = [
                 mock.call.getCPG(HPE3PAR_CPG),
@@ -1468,10 +1484,12 @@ class HPE3PARBaseDriver(object):
 
             osv_matcher = 'osv-' + volume_name_3par
 
+            comment = Comment({"qos": {}, "display_name": "Foo Volume"})
+
             expected = [
                 mock.call.modifyVolume(
                     osv_matcher,
-                    {'comment': '{"qos": {}, "display_name": "Foo Volume"}',
+                    {'comment': comment,
                      'snapCPG': HPE3PAR_CPG_SNAP}),
                 mock.call.modifyVolume(osv_matcher,
                                        {'action': 6,
@@ -1533,17 +1551,17 @@ class HPE3PARBaseDriver(object):
 
             osv_matcher = 'osv-' + volume_name_3par
 
-            expected_comment = {
+            expected_comment = Comment({
                 "display_name": display_name,
                 "volume_type_id": self.RETYPE_VOLUME_TYPE_2['id'],
                 "volume_type_name": self.RETYPE_VOLUME_TYPE_2['name'],
                 "vvs": self.RETYPE_VOLUME_TYPE_2['extra_specs']['vvs']
-            }
+            })
+
             expected = [
                 mock.call.modifyVolume(
                     osv_matcher,
-                    {'comment': self.CommentMatcher(self.assertEqual,
-                                                    expected_comment),
+                    {'comment': expected_comment,
                      'snapCPG': self.RETYPE_VOLUME_TYPE_2
                      ['extra_specs']['snap_cpg']}),
                 mock.call.modifyVolume(
@@ -1635,20 +1653,22 @@ class HPE3PARBaseDriver(object):
 
             osv_matcher = 'osv-' + volume_name_3par
 
-            expected = [
-                mock.call.modifyVolume(
-                    osv_matcher,
-                    {'comment': '{"qos": {}, "display_name": "Foo Volume"}',
-                     'snapCPG': HPE3PAR_CPG_SNAP}),
-                mock.call.modifyVolume(osv_matcher,
-                                       {'action': 6,
-                                        'userCPG': 'CPG-FC1',
-                                        'conversionOperation': 1,
-                                        'tuneOperation': 1}),
-                mock.call.getTask(mock.ANY),
-            ]
+        comment = Comment({"qos": {}, "display_name": "Foo Volume"})
 
-            mock_client.assert_has_calls(expected + self.standard_logout)
+        expected = [
+            mock.call.modifyVolume(
+                osv_matcher,
+                {'comment': comment,
+                 'snapCPG': HPE3PAR_CPG_SNAP}),
+            mock.call.modifyVolume(osv_matcher,
+                                   {'action': 6,
+                                    'userCPG': 'CPG-FC1',
+                                    'conversionOperation': 1,
+                                    'tuneOperation': 1}),
+            mock.call.getTask(mock.ANY),
+        ]
+
+        mock_client.assert_has_calls(expected + self.standard_logout)
 
     @mock.patch.object(volume_types, 'get_volume_type')
     def test_migrate_volume_attached(self, _mock_volume_types):
@@ -1685,12 +1705,13 @@ class HPE3PARBaseDriver(object):
             result = self.driver.migrate_volume(context.get_admin_context(),
                                                 volume, host)
 
-            new_comment = {"qos": {},
-                           "retype_test": "test comment"}
+            new_comment = Comment({
+                "qos": {},
+                "retype_test": "test comment",
+            })
             expected = [
                 mock.call.modifyVolume(osv_matcher,
-                                       {'comment': self.CommentMatcher(
-                                           self.assertEqual, new_comment),
+                                       {'comment': new_comment,
                                         'snapCPG': 'OpenStackCPGSnap'}),
                 mock.call.modifyVolume(osv_matcher,
                                        {'action': 6,
@@ -1838,13 +1859,13 @@ class HPE3PARBaseDriver(object):
             mock_create_client.return_value = mock_client
             self.driver.create_snapshot(self.snapshot)
 
-            comment = (
-                '{"volume_id": "761fc5e5-5191-4ec7-aeba-33e36de44156",'
-                ' "display_name": "fakesnap",'
-                ' "description": "test description name",'
-                ' "volume_name":'
-                ' "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7"}')
-
+            comment = Comment({
+                "volume_id": "761fc5e5-5191-4ec7-aeba-33e36de44156",
+                "display_name": "fakesnap",
+                "description": "test description name",
+                "volume_name":
+                "volume-d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+            })
             expected = [
                 mock.call.createSnapshot(
                     'oss-L4I73ONuTci9Fd4ceij-MQ',
@@ -1924,11 +1945,11 @@ class HPE3PARBaseDriver(object):
                 self.snapshot)
             self.assertIsNone(model_update)
 
-            comment = (
-                '{"snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",'
-                ' "display_name": "Foo Volume",'
-                ' "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"}')
-
+            comment = Comment({
+                "snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",
+                "display_name": "Foo Volume",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+            })
             expected = [
                 mock.call.createSnapshot(
                     self.VOLUME_3PAR_NAME,
@@ -1971,11 +1992,11 @@ class HPE3PARBaseDriver(object):
                 self.snapshot)
             self.assertEqual(None, model_update)
 
-            comment = (
-                '{"snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",'
-                ' "display_name": "Foo Volume",'
-                ' "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"}')
-
+            comment = Comment({
+                "snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",
+                "display_name": "Foo Volume",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+            })
             volume_name_3par = common._encode_name(volume['id'])
             osv_matcher = 'osv-' + volume_name_3par
             omv_matcher = 'omv-' + volume_name_3par
@@ -2036,10 +2057,11 @@ class HPE3PARBaseDriver(object):
                 self.snapshot)
             self.assertEqual(None, model_update)
 
-            comment = (
-                '{"snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",'
-                ' "display_name": "Foo Volume",'
-                ' "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"}')
+            comment = Comment({
+                "snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",
+                "display_name": "Foo Volume",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+            })
 
             volume_name_3par = common._encode_name(volume['id'])
             osv_matcher = 'osv-' + volume_name_3par
@@ -2111,10 +2133,11 @@ class HPE3PARBaseDriver(object):
                 self.volume_qos,
                 self.snapshot)
 
-            comment = (
-                '{"snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",'
-                ' "display_name": "Foo Volume",'
-                ' "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7"}')
+            comment = Comment({
+                "snapshot_id": "2f823bdc-e36e-4dc8-bd15-de1c7a28ff31",
+                "display_name": "Foo Volume",
+                "volume_id": "d03338a9-9115-48a3-8dfc-35cdfcdc15a7",
+            })
 
             expected = [
                 mock.call.createSnapshot(
@@ -2472,11 +2495,12 @@ class HPE3PARBaseDriver(object):
         _mock_volume_types.return_value = self.volume_type
         mock_client = self.setup_driver()
 
-        new_comment = {"display_name": "Foo Volume",
-                       "name": "volume-007dbfce-7579-40bc-8f90-a20b3902283e",
-                       "volume_id": "007dbfce-7579-40bc-8f90-a20b3902283e",
-                       "type": "OpenStack"}
-
+        new_comment = Comment({
+            "display_name": "Foo Volume",
+            "name": "volume-007dbfce-7579-40bc-8f90-a20b3902283e",
+            "volume_id": "007dbfce-7579-40bc-8f90-a20b3902283e",
+            "type": "OpenStack",
+        })
         volume = {'display_name': None,
                   'host': self.FAKE_CINDER_HOST,
                   'volume_type': 'gold',
@@ -2505,11 +2529,10 @@ class HPE3PARBaseDriver(object):
                 mock.call.getVolume(existing_ref['source-name']),
                 mock.call.modifyVolume(existing_ref['source-name'],
                                        {'newName': osv_matcher,
-                                        'comment': self.CommentMatcher(
-                                            self.assertEqual, new_comment)}),
+                                        'comment': new_comment}),
             ]
 
-            retype_comment_qos = {
+            retype_comment_qos = Comment({
                 "display_name": "Foo Volume",
                 "volume_type_name": self.volume_type['name'],
                 "volume_type_id": self.volume_type['id'],
@@ -2521,14 +2544,12 @@ class HPE3PARBaseDriver(object):
                     'latency': '25',
                     'priority': 'low'
                 }
-            }
+            })
 
             expected_snap_cpg = HPE3PAR_CPG_SNAP
             expected_retype_modify = [
                 mock.call.modifyVolume(osv_matcher,
-                                       {'comment': self.CommentMatcher(
-                                           self.assertEqual,
-                                           retype_comment_qos),
+                                       {'comment': retype_comment_qos,
                                         'snapCPG': expected_snap_cpg}),
                 mock.call.deleteVolumeSet(vvs_matcher),
             ]
@@ -2561,10 +2582,12 @@ class HPE3PARBaseDriver(object):
         _mock_volume_types.return_value = self.volume_type
         mock_client = self.setup_driver()
 
-        new_comment = {"display_name": "Foo Volume",
-                       "name": "volume-007dbfce-7579-40bc-8f90-a20b3902283e",
-                       "volume_id": "007dbfce-7579-40bc-8f90-a20b3902283e",
-                       "type": "OpenStack"}
+        new_comment = Comment({
+            "display_name": "Foo Volume",
+            "name": "volume-007dbfce-7579-40bc-8f90-a20b3902283e",
+            "volume_id": "007dbfce-7579-40bc-8f90-a20b3902283e",
+            "type": "OpenStack",
+        })
 
         volume = {'display_name': None,
                   'host': 'my-stack1@3parxxx#CPGNOTUSED',
@@ -2594,8 +2617,7 @@ class HPE3PARBaseDriver(object):
                 mock.call.modifyVolume(
                     existing_ref['source-name'],
                     {'newName': osv_matcher,
-                     'comment': self.CommentMatcher(self.assertEqual,
-                                                    new_comment),
+                     'comment': new_comment,
                      # manage_existing() should be setting
                      # blank snapCPG to the userCPG
                      'snapCPG': 'testUserCpg0'})
@@ -2616,11 +2638,12 @@ class HPE3PARBaseDriver(object):
         mock_client.getTask.return_value = self.STATUS_DONE
 
         id = '007abcde-7579-40bc-8f90-a20b3902283e'
-        new_comment = {"display_name": "Test Volume",
-                       "name": ("volume-%s" % id),
-                       "volume_id": id,
-                       "type": "OpenStack"}
-
+        new_comment = Comment({
+            "display_name": "Test Volume",
+            "name": ("volume-%s" % id),
+            "volume_id": id,
+            "type": "OpenStack",
+        })
         volume = {'display_name': 'Test Volume',
                   'host': 'my-stack1@3parxxx#CPGNOTUSED',
                   'volume_type': 'gold',
@@ -2645,22 +2668,19 @@ class HPE3PARBaseDriver(object):
                 mock.call.getVolume(existing_ref['source-name']),
                 mock.call.modifyVolume(existing_ref['source-name'],
                                        {'newName': osv_matcher,
-                                        'comment': self.CommentMatcher(
-                                            self.assertEqual, new_comment)})
+                                        'comment': new_comment})
             ]
 
-            retype_comment_vvs = {
+            retype_comment_vvs = Comment({
                 "display_name": "Foo Volume",
                 "volume_type_name": test_volume_type['name'],
                 "volume_type_id": test_volume_type['id'],
                 "vvs": vvs
-            }
+            })
 
             expected_retype = [
                 mock.call.modifyVolume(osv_matcher,
-                                       {'comment': self.CommentMatcher(
-                                           self.assertEqual,
-                                           retype_comment_vvs),
+                                       {'comment': retype_comment_vvs,
                                         'snapCPG': 'OpenStackCPGSnap'}),
                 mock.call.deleteVolumeSet(vvs_matcher),
                 mock.call.addVolumeToVolumeSet(vvs, osv_matcher),
@@ -2681,13 +2701,13 @@ class HPE3PARBaseDriver(object):
     def test_manage_existing_no_volume_type(self):
         mock_client = self.setup_driver()
 
-        comment = (
-            '{"display_name": "Foo Volume"}')
-        new_comment = (
-            '{"type": "OpenStack",'
-            ' "display_name": "Foo Volume",'
-            ' "name": "volume-007dbfce-7579-40bc-8f90-a20b3902283e",'
-            ' "volume_id": "007dbfce-7579-40bc-8f90-a20b3902283e"}')
+        comment = repr({"display_name": "Foo Volume"})
+        new_comment = Comment({
+            "type": "OpenStack",
+            "display_name": "Foo Volume",
+            "name": "volume-007dbfce-7579-40bc-8f90-a20b3902283e",
+            "volume_id": "007dbfce-7579-40bc-8f90-a20b3902283e",
+        })
         volume = {'display_name': None,
                   'volume_type': None,
                   'volume_type_id': None,
@@ -2798,8 +2818,7 @@ class HPE3PARBaseDriver(object):
     def test_manage_existing_volume_type_exception(self):
         mock_client = self.setup_driver()
 
-        comment = (
-            '{"display_name": "Foo Volume"}')
+        comment = repr({"display_name": "Foo Volume"})
         volume = {'display_name': None,
                   'volume_type': 'gold',
                   'volume_type_id': 'bcfa9fa4-54a0-4340-a3d8-bfcf19aea65e',
@@ -2996,28 +3015,20 @@ class HPE3PARBaseDriver(object):
         self.assertEqual(fixed_hostname, safe_host)
 
     def test_create_consistency_group(self):
-        class fake_consitencygroup_object(object):
-            volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
-            name = 'cg_name'
-            cgsnapshot_id = None
-            host = self.FAKE_CINDER_HOST
-            id = self.CONSIS_GROUP_ID
-            description = 'consistency group'
-
         mock_client = self.setup_driver()
 
-        comment = (
-            "{'display_name': 'cg_name',"
-            " 'consistency_group_id':"
-            " '" + self.CONSIS_GROUP_ID + "',"
-            " 'description': 'consistency group'}")
+        comment = Comment({
+            'display_name': 'cg_name',
+            'consistency_group_id': self.CONSIS_GROUP_ID,
+            'description': 'consistency group',
+        })
 
         with mock.patch.object(hpecommon.HPE3PARCommon,
                                '_create_client') as mock_create_client:
             mock_create_client.return_value = mock_client
             mock_client.getCPG.return_value = {'domain': None}
             # create a consistency group
-            group = fake_consitencygroup_object()
+            group = self.fake_consistencygroup_object()
             self.driver.create_consistencygroup(context.get_admin_context(),
                                                 group)
 
@@ -3035,29 +3046,23 @@ class HPE3PARBaseDriver(object):
                 self.standard_logout)
 
     def test_create_consistency_group_from_src(self):
-        class fake_consitencygroup_object(object):
-            volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
-            name = 'cg_name'
-            cgsnapshot_id = None
-            host = self.FAKE_CINDER_HOST
-            id = self.CONSIS_GROUP_ID
-            description = 'consistency group'
-
         mock_client = self.setup_driver()
         volume = self.volume
 
+        cgsnap_comment = Comment({
+            "consistency_group_id": "6044fedf-c889-4752-900f-2039d247a5df",
+            "description": "cgsnapshot",
+            "cgsnapshot_id": "e91c5ed5-daee-4e84-8724-1c9e31e7a1f2",
+        })
+
         cgsnap_optional = (
-            {'comment': '{"consistency_group_id":'
-             ' "6044fedf-c889-4752-900f-2039d247a5df",'
-             ' "description": "cgsnapshot",'
-             ' "cgsnapshot_id": "e91c5ed5-daee-4e84-8724-1c9e31e7a1f2"}',
+            {'comment': cgsnap_comment,
              'readOnly': False})
 
-        cg_comment = (
-            "{'display_name': 'cg_name',"
-            " 'consistency_group_id':"
-            " '" + self.CONSIS_GROUP_ID + "',"
-            " 'description': 'consistency group'}")
+        cg_comment = Comment({
+            'display_name': 'cg_name',
+            'consistency_group_id': self.CONSIS_GROUP_ID,
+            'description': 'consistency group'})
 
         with mock.patch.object(hpecommon.HPE3PARCommon,
                                '_create_client') as mock_create_client:
@@ -3065,7 +3070,7 @@ class HPE3PARBaseDriver(object):
             mock_client.getCPG.return_value = {'domain': None}
 
             # create a consistency group
-            group = fake_consitencygroup_object()
+            group = self.fake_consistencygroup_object()
             self.driver.create_consistencygroup(context.get_admin_context(),
                                                 group)
 
@@ -3102,8 +3107,9 @@ class HPE3PARBaseDriver(object):
             mock_client.reset_mock()
 
             # create a snapshot of the consistency group
+            cgsnapshot = self.fake_cgsnapshot_object()
             self.driver.create_cgsnapshot(context.get_admin_context(),
-                                          self.cgsnapshot, [])
+                                          cgsnapshot, [])
 
             expected = [
                 mock.call.createSnapshotOfVolumeSet(
@@ -3114,7 +3120,7 @@ class HPE3PARBaseDriver(object):
             # create a consistency group from the cgsnapshot
             self.driver.create_consistencygroup_from_src(
                 context.get_admin_context(), group,
-                [volume], cgsnapshot=self.cgsnapshot,
+                [volume], cgsnapshot=cgsnapshot,
                 snapshots=[self.snapshot])
 
             mock_client.assert_has_calls(
@@ -3124,21 +3130,12 @@ class HPE3PARBaseDriver(object):
                 self.standard_logout)
 
     def test_delete_consistency_group(self):
-        class fake_consitencygroup_object(object):
-            volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
-            name = 'cg_name'
-            cgsnapshot_id = None
-            host = self.FAKE_CINDER_HOST
-            id = self.CONSIS_GROUP_ID
-            description = 'consistency group'
-
         mock_client = self.setup_driver()
 
-        comment = (
-            "{'display_name': 'cg_name',"
-            " 'consistency_group_id':"
-            " '" + self.CONSIS_GROUP_ID + "',"
-            " 'description': 'consistency group'}")
+        comment = Comment({
+            'display_name': 'cg_name',
+            'consistency_group_id': self.CONSIS_GROUP_ID,
+            'description': 'consistency group'})
 
         with mock.patch.object(hpecommon.HPE3PARCommon,
                                '_create_client') as mock_create_client:
@@ -3146,7 +3143,7 @@ class HPE3PARBaseDriver(object):
             mock_client.getCPG.return_value = {'domain': None}
 
             # create a consistency group
-            group = fake_consitencygroup_object()
+            group = self.fake_consistencygroup_object()
             self.driver.create_consistencygroup(context.get_admin_context(),
                                                 group)
 
@@ -3180,22 +3177,13 @@ class HPE3PARBaseDriver(object):
                 self.standard_logout)
 
     def test_update_consistency_group_add_vol(self):
-        class fake_consitencygroup_object(object):
-            volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
-            name = 'cg_name'
-            cgsnapshot_id = None
-            host = self.FAKE_CINDER_HOST
-            id = self.CONSIS_GROUP_ID
-            description = 'consistency group'
-
         mock_client = self.setup_driver()
         volume = self.volume
 
-        comment = (
-            "{'display_name': 'cg_name',"
-            " 'consistency_group_id':"
-            " '" + self.CONSIS_GROUP_ID + "',"
-            " 'description': 'consistency group'}")
+        comment = Comment({
+            'display_name': 'cg_name',
+            'consistency_group_id': self.CONSIS_GROUP_ID,
+            'description': 'consistency group'})
 
         with mock.patch.object(hpecommon.HPE3PARCommon,
                                '_create_client') as mock_create_client:
@@ -3203,7 +3191,7 @@ class HPE3PARBaseDriver(object):
             mock_client.getCPG.return_value = {'domain': None}
 
             # create a consistency group
-            group = fake_consitencygroup_object()
+            group = self.fake_consistencygroup_object()
             self.driver.create_consistencygroup(context.get_admin_context(),
                                                 group)
 
@@ -3239,22 +3227,13 @@ class HPE3PARBaseDriver(object):
                 self.standard_logout)
 
     def test_update_consistency_group_remove_vol(self):
-        class fake_consitencygroup_object(object):
-            volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
-            name = 'cg_name'
-            cgsnapshot_id = None
-            host = self.FAKE_CINDER_HOST
-            id = self.CONSIS_GROUP_ID
-            description = 'consistency group'
-
         mock_client = self.setup_driver()
         volume = self.volume
 
-        comment = (
-            "{'display_name': 'cg_name',"
-            " 'consistency_group_id':"
-            " '" + self.CONSIS_GROUP_ID + "',"
-            " 'description': 'consistency group'}")
+        comment = Comment({
+            'display_name': 'cg_name',
+            'consistency_group_id': self.CONSIS_GROUP_ID,
+            'description': 'consistency group'})
 
         with mock.patch.object(hpecommon.HPE3PARCommon,
                                '_create_client') as mock_create_client:
@@ -3262,7 +3241,7 @@ class HPE3PARBaseDriver(object):
             mock_client.getCPG.return_value = {'domain': None}
 
             # create a consistency group
-            group = fake_consitencygroup_object()
+            group = self.fake_consistencygroup_object()
             self.driver.create_consistencygroup(context.get_admin_context(),
                                                 group)
 
@@ -3316,28 +3295,21 @@ class HPE3PARBaseDriver(object):
                 self.standard_logout)
 
     def test_create_cgsnapshot(self):
-        class fake_consitencygroup_object(object):
-            volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
-            name = 'cg_name'
-            cgsnapshot_id = None
-            host = self.FAKE_CINDER_HOST
-            id = self.CONSIS_GROUP_ID
-            description = 'consistency group'
-
         mock_client = self.setup_driver()
         volume = self.volume
 
-        cg_comment = (
-            "{'display_name': 'cg_name',"
-            " 'consistency_group_id':"
-            " '" + self.CONSIS_GROUP_ID + "',"
-            " 'description': 'consistency group'}")
+        cg_comment = Comment({
+            'display_name': 'cg_name',
+            'consistency_group_id': self.CONSIS_GROUP_ID,
+            'description': 'consistency group'})
+
+        cgsnap_comment = Comment({
+            "consistency_group_id": "6044fedf-c889-4752-900f-2039d247a5df",
+            "description": "cgsnapshot",
+            "cgsnapshot_id": "e91c5ed5-daee-4e84-8724-1c9e31e7a1f2"})
 
         cgsnap_optional = (
-            {'comment': '{"consistency_group_id":'
-             ' "6044fedf-c889-4752-900f-2039d247a5df",'
-             ' "description": "cgsnapshot",'
-             ' "cgsnapshot_id": "e91c5ed5-daee-4e84-8724-1c9e31e7a1f2"}',
+            {'comment': cgsnap_comment,
              'readOnly': False})
 
         with mock.patch.object(hpecommon.HPE3PARCommon,
@@ -3346,7 +3318,7 @@ class HPE3PARBaseDriver(object):
             mock_client.getCPG.return_value = {'domain': None}
 
             # create a consistency group
-            group = fake_consitencygroup_object()
+            group = self.fake_consistencygroup_object()
             self.driver.create_consistencygroup(context.get_admin_context(),
                                                 group)
 
@@ -3383,8 +3355,9 @@ class HPE3PARBaseDriver(object):
             mock_client.reset_mock()
 
             # create a snapshot of the consistency group
+            cgsnapshot = self.fake_cgsnapshot_object()
             self.driver.create_cgsnapshot(context.get_admin_context(),
-                                          self.cgsnapshot, [])
+                                          cgsnapshot, [])
 
             expected = [
                 mock.call.createSnapshotOfVolumeSet(
@@ -3399,30 +3372,22 @@ class HPE3PARBaseDriver(object):
                 self.standard_logout)
 
     def test_delete_cgsnapshot(self):
-        class fake_consitencygroup_object(object):
-            volume_type_id = '49fa96b5-828e-4653-b622-873a1b7e6f1c'
-            name = 'cg_name'
-            cgsnapshot_id = None
-            host = self.FAKE_CINDER_HOST
-            id = self.CONSIS_GROUP_ID
-            description = 'consistency group'
-
         mock_client = self.setup_driver()
         volume = self.volume
-        cgsnapshot = self.cgsnapshot
+        cgsnapshot = self.fake_cgsnapshot_object()
 
-        cg_comment = (
-            "{'display_name': 'cg_name',"
-            " 'consistency_group_id':"
-            " '" + self.CONSIS_GROUP_ID + "',"
-            " 'description': 'consistency group'}")
+        cg_comment = Comment({
+            'display_name': 'cg_name',
+            'consistency_group_id': self.CONSIS_GROUP_ID,
+            'description': 'consistency group'})
 
-        cgsnap_optional = (
-            {'comment': '{"consistency_group_id":'
-             ' "6044fedf-c889-4752-900f-2039d247a5df",'
-             ' "description": "cgsnapshot",'
-             ' "cgsnapshot_id": "e91c5ed5-daee-4e84-8724-1c9e31e7a1f2"}',
-             'readOnly': False})
+        cgsnap_comment = Comment({
+            "consistency_group_id": "6044fedf-c889-4752-900f-2039d247a5df",
+            "description": "cgsnapshot",
+            "cgsnapshot_id": "e91c5ed5-daee-4e84-8724-1c9e31e7a1f2"})
+
+        cgsnap_optional = {'comment': cgsnap_comment,
+                           'readOnly': False}
 
         with mock.patch.object(hpecommon.HPE3PARCommon,
                                '_create_client') as mock_create_client:
@@ -3430,7 +3395,7 @@ class HPE3PARBaseDriver(object):
             mock_client.getCPG.return_value = {'domain': None}
 
             # create a consistency group
-            group = fake_consitencygroup_object()
+            group = self.fake_consistencygroup_object()
             self.driver.create_consistencygroup(context.get_admin_context(),
                                                 group)
 
@@ -3477,7 +3442,7 @@ class HPE3PARBaseDriver(object):
                     optional=cgsnap_optional)]
 
             # delete the snapshot of the consistency group
-            cgsnapshot['status'] = 'deleting'
+            cgsnapshot.status = 'deleting'
             self.driver.delete_cgsnapshot(context.get_admin_context(),
                                           cgsnapshot, [])
 
@@ -4328,14 +4293,16 @@ class TestHPE3PARFCDriver(HPE3PARBaseDriver, test.TestCase):
                 common,
                 self.volume,
                 self.connector)
+            # On Python 3, hash is randomized, and so set() is used to get
+            # the expected order
+            fcwwns = list(set(('123456789054321', '123456789012345')))
             expected = [
                 mock.call.getVolume('osv-0DM4qZEVSKON-DXN-NwVpw'),
                 mock.call.getCPG(HPE3PAR_CPG),
                 mock.call.getHost('fakehost'),
-                mock.call.modifyHost(
-                    'fakehost', {
-                        'FCWWNs': ['123456789012345', '123456789054321'],
-                        'pathOperation': 1}),
+                mock.call.modifyHost('fakehost',
+                                     {'FCWWNs': fcwwns,
+                                      'pathOperation': 1}),
                 mock.call.getHost('fakehost')]
 
             mock_client.assert_has_calls(expected)
