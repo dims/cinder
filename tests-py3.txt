@@ -18,7 +18,12 @@ cinder.tests.unit.api.test_versions
 cinder.tests.unit.api.test_xmlutil
 cinder.tests.unit.image.test_cache
 cinder.tests.unit.image.test_glance
+cinder.tests.unit.keymgr.test_barbican
+cinder.tests.unit.keymgr.test_conf_key_mgr
+cinder.tests.unit.keymgr.test_key
+cinder.tests.unit.keymgr.test_key_mgr
 cinder.tests.unit.keymgr.test_mock_key_mgr
+cinder.tests.unit.keymgr.test_not_implemented_key_mgr
 cinder.tests.unit.scheduler.test_allocated_capacity_weigher
 cinder.tests.unit.scheduler.test_capacity_weigher
 cinder.tests.unit.scheduler.test_chance_weigher
@@ -87,6 +92,7 @@ cinder.tests.unit.test_misc
 cinder.tests.unit.test_netapp
 cinder.tests.unit.test_netapp_nfs
 cinder.tests.unit.test_netapp_ssc
+cinder.tests.unit.test_nexenta_edge
 cinder.tests.unit.test_nfs
 cinder.tests.unit.test_nimble
 cinder.tests.unit.test_prophetstor_dpl
@@ -102,9 +108,9 @@ cinder.tests.unit.test_scality
 cinder.tests.unit.test_service
 cinder.tests.unit.test_sheepdog
 cinder.tests.unit.test_smbfs
-cinder.tests.unit.test_srb
 cinder.tests.unit.test_solidfire
 cinder.tests.unit.test_ssh_utils
+cinder.tests.unit.test_storwize_svc
 cinder.tests.unit.test_test
 cinder.tests.unit.test_test_utils
 cinder.tests.unit.test_tintri
@@ -127,6 +133,7 @@ cinder.tests.unit.test_volume_types
 cinder.tests.unit.test_volume_types_extra_specs
 cinder.tests.unit.test_volume_utils
 cinder.tests.unit.test_vzstorage
+cinder.tests.unit.test_xio
 cinder.tests.unit.test_zfssa
 cinder.tests.unit.volume.drivers.emc.scaleio
 cinder.tests.unit.volume.flows.test_create_volume_flow

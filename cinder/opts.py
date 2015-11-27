@@ -96,6 +96,8 @@ from cinder.volume.drivers.hitachi import hnas_nfs as \
     cinder_volume_drivers_hitachi_hnasnfs
 from cinder.volume.drivers.hpe import hpe_3par_common as \
     cinder_volume_drivers_hpe_hpe3parcommon
+from cinder.volume.drivers.hpe import hpe_lefthand_iscsi as \
+    cinder_volume_drivers_hpe_hpelefthandiscsi
 from cinder.volume.drivers.huawei import huawei_driver as \
     cinder_volume_drivers_huawei_huaweidriver
 from cinder.volume.drivers.ibm import flashsystem_common as \
@@ -117,6 +119,8 @@ from cinder.volume.drivers.lenovo import lenovo_common as \
 from cinder.volume.drivers import lvm as cinder_volume_drivers_lvm
 from cinder.volume.drivers.netapp import options as \
     cinder_volume_drivers_netapp_options
+from cinder.volume.drivers.nexenta.nexentaedge import iscsi as \
+    cinder_volume_drivers_nexenta_nexentaedge_iscsi
 from cinder.volume.drivers import nfs as cinder_volume_drivers_nfs
 from cinder.volume.drivers import nimble as cinder_volume_drivers_nimble
 from cinder.volume.drivers.prophetstor import options as \
@@ -125,8 +129,6 @@ from cinder.volume.drivers import pure as cinder_volume_drivers_pure
 from cinder.volume.drivers import quobyte as cinder_volume_drivers_quobyte
 from cinder.volume.drivers import rbd as cinder_volume_drivers_rbd
 from cinder.volume.drivers import remotefs as cinder_volume_drivers_remotefs
-from cinder.volume.drivers.san.hp import hp_lefthand_rest_proxy as \
-    cinder_volume_drivers_san_hp_hplefthandrestproxy
 from cinder.volume.drivers.san.hp import hp_xp_opts as \
     cinder_volume_drivers_san_hp_hpxpopts
 from cinder.volume.drivers.san.hp import hpmsa_common as \
@@ -136,7 +138,6 @@ from cinder.volume.drivers import scality as cinder_volume_drivers_scality
 from cinder.volume.drivers import sheepdog as cinder_volume_drivers_sheepdog
 from cinder.volume.drivers import smbfs as cinder_volume_drivers_smbfs
 from cinder.volume.drivers import solidfire as cinder_volume_drivers_solidfire
-from cinder.volume.drivers import srb as cinder_volume_drivers_srb
 from cinder.volume.drivers import tintri as cinder_volume_drivers_tintri
 from cinder.volume.drivers.violin import v6000_common as \
     cinder_volume_drivers_violin_v6000common
@@ -177,7 +178,8 @@ def list_opts():
                 cinder_backup_chunkeddriver.chunkedbackup_service_opts,
                 cinder_volume_drivers_san_san.san_opts,
                 cinder_volume_drivers_hitachi_hnasnfs.NFS_OPTS,
-                cinder_volume_drivers_violin_v7000common.violin_opts,
+                cinder_wsgi_eventletserver.socket_opts,
+                cinder_wsgi_eventletserver.eventlet_opts,
                 cinder_sshutils.ssh_opts,
                 cinder_volume_drivers_netapp_options.netapp_proxy_opts,
                 cinder_volume_drivers_netapp_options.netapp_connection_opts,
@@ -197,7 +199,7 @@ def list_opts():
                 cinder_volume_drivers_san_hp_hpxpopts.HORCM_VOLUME_OPTS,
                 cinder_test.test_opts,
                 cinder.volume.drivers.ibm.storwize_svc.storwize_svc_opts,
-                cinder_backup_manager.backup_manager_opts,
+                cinder_volume_drivers_violin_v7000common.violin_opts,
                 cinder_exception.exc_log_opts,
                 cinder_common_config.global_opts,
                 cinder_scheduler_weights_capacity.capacity_weight_opts,
@@ -239,8 +241,6 @@ def list_opts():
                 volume_number_weight_opts,
                 cinder_volume_drivers_xio.XIO_OPTS,
                 cinder_volume_drivers_zfssa_zfssaiscsi.ZFSSA_OPTS,
-                cinder_wsgi_eventletserver.socket_opts,
-                cinder_wsgi_eventletserver.eventlet_opts,
                 cinder_volume_driver.volume_opts,
                 cinder_volume_driver.iser_opts,
                 cinder_api_views_versions.versions_opts,
@@ -250,12 +250,12 @@ def list_opts():
                 cinder_volume_drivers_san_hp_hpmsacommon.iscsi_opts,
                 cinder_image_glance.glance_opts,
                 cinder_image_glance.glance_core_properties_opts,
+                cinder_volume_drivers_hpe_hpelefthandiscsi.hpelefthand_opts,
                 cinder_volume_drivers_lvm.volume_opts,
                 cinder_volume_drivers_emc_emcvmaxcommon.emc_opts,
                 cinder_volume_drivers_remotefs.nas_opts,
                 cinder_volume_drivers_remotefs.volume_opts,
                 cinder_volume_drivers_violin_v6000common.violin_opts,
-                cinder_volume_drivers_srb.srb_opts,
                 cinder_volume_drivers_emc_xtremio.XTREMIO_OPTS,
                 [cinder_api_middleware_auth.use_forwarded_for_opt],
                 cinder_volume_drivers_hitachi_hbsdcommon.volume_opts,
@@ -267,8 +267,7 @@ def list_opts():
                 cinder_volume_drivers_rbd.rbd_opts,
                 cinder_volume_drivers_tintri.tintri_opts,
                 cinder_volume_drivers_hitachi_hbsdhorcm.volume_opts,
-                cinder_volume_drivers_san_hp_hplefthandrestproxy.
-                hplefthand_opts,
+                cinder_backup_manager.backup_manager_opts,
                 cinder_volume_drivers_hitachi_hbsdfc.volume_opts,
                 cinder_quota.quota_opts,
                 cinder_volume_drivers_huawei_huaweidriver.huawei_opts,
@@ -288,6 +287,8 @@ def list_opts():
                 cinder_volume_drivers_prophetstor_options.DPL_OPTS,
                 cinder_volume_drivers_hitachi_hbsdiscsi.volume_opts,
                 cinder_volume_manager.volume_manager_opts,
+                cinder_volume_drivers_nexenta_nexentaedge_iscsi.
+                nexenta_edge_opts,
                 cinder_volume_drivers_ibm_flashsystemiscsi.
                 flashsystem_iscsi_opts,
                 cinder_volume_drivers_ibm_flashsystemcommon.flashsystem_opts,
