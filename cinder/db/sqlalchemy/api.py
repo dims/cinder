@@ -19,6 +19,7 @@
 """Implementation of SQLAlchemy backend."""
 
 
+import collections
 import datetime as dt
 import functools
 import re
@@ -38,7 +39,7 @@ import osprofiler.sqlalchemy
 import six
 import sqlalchemy
 from sqlalchemy import MetaData
-from sqlalchemy import or_
+from sqlalchemy import or_, case
 from sqlalchemy.orm import joinedload, joinedload_all
 from sqlalchemy.orm import RelationshipProperty
 from sqlalchemy.schema import Table
@@ -50,13 +51,13 @@ from sqlalchemy.sql import sqltypes
 
 from cinder.api import common
 from cinder.common import sqlalchemyutils
+from cinder import db
 from cinder.db.sqlalchemy import models
 from cinder import exception
 from cinder.i18n import _, _LW, _LE, _LI
 
 
 CONF = cfg.CONF
-CONF.import_group("profiler", "cinder.service")
 LOG = logging.getLogger(__name__)
 
 options.set_defaults(CONF, connection='sqlite:///$state_path/cinder.sqlite')
@@ -75,6 +76,11 @@ def _create_facade_lazily():
                 **dict(CONF.database)
             )
 
+            # NOTE(geguileo): To avoid a cyclical dependency we import the
+            # group here.  Dependency cycle is objects.base requires db.api,
+            # which requires db.sqlalchemy.api, which requires service which
+            # requires objects.base
+            CONF.import_group("profiler", "cinder.service")
             if CONF.profiler.profiler_enabled:
                 if CONF.profiler.trace_sqlalchemy:
                     osprofiler.sqlalchemy.add_tracing(sqlalchemy,
@@ -1879,47 +1885,49 @@ def _volume_x_metadata_get_item(context, volume_id, key, model, notfound_exec,
     return result
 
 
-def _volume_x_metadata_update(context, volume_id, metadata, delete,
-                              model, notfound_exec, session=None):
-    if not session:
-        session = get_session()
+def _volume_x_metadata_update(context, volume_id, metadata, delete, model,
+                              session=None):
+    session = session or get_session()
+    metadata = metadata.copy()
 
     with session.begin(subtransactions=True):
-        # Set existing metadata to deleted if delete argument is True
+        # Set existing metadata to deleted if delete argument is True.  This is
+        # commited immediately to the DB
         if delete:
-            original_metadata = _volume_x_metadata_get(context, volume_id,
-                                                       model, session=session)
-            for meta_key, meta_value in original_metadata.items():
-                if meta_key not in metadata:
-                    meta_ref = _volume_x_metadata_get_item(context, volume_id,
-                                                           meta_key, model,
-                                                           notfound_exec,
-                                                           session=session)
-                    meta_ref.update({'deleted': True})
-                    meta_ref.save(session=session)
+            expected_values = {'volume_id': volume_id}
+            # We don't want to delete keys we are going to update
+            if metadata:
+                expected_values['key'] = db.Not(metadata.keys())
+            conditional_update(context, model, {'deleted': True},
+                               expected_values)
 
-        meta_ref = None
+        # Get existing metadata
+        db_meta = _volume_x_metadata_get_query(context, volume_id, model).all()
+        save = []
+        skip = []
 
-        # Now update all existing items with new values, or create new meta
-        # objects
-        for meta_key, meta_value in metadata.items():
+        # We only want to send changed metadata.
+        for row in db_meta:
+            if row.key in metadata:
+                value = metadata.pop(row.key)
+                if row.value != value:
+                    # ORM objects will not be saved until we do the bulk save
+                    row.value = value
+                    save.append(row)
+                    continue
+            skip.append(row)
 
-            # update the value whether it exists or not
-            item = {"value": meta_value}
+        # We also want to save non-existent metadata
+        save.extend(model(key=key, value=value, volume_id=volume_id)
+                    for key, value in metadata.items())
+        # Do a bulk save
+        if save:
+            session.bulk_save_objects(save, update_changed_only=True)
 
-            try:
-                meta_ref = _volume_x_metadata_get_item(context, volume_id,
-                                                       meta_key, model,
-                                                       notfound_exec,
-                                                       session=session)
-            except notfound_exec:
-                meta_ref = model()
-                item.update({"key": meta_key, "volume_id": volume_id})
-
-            meta_ref.update(item)
-            meta_ref.save(session=session)
-
-    return _volume_x_metadata_get(context, volume_id, model)
+        # Construct result dictionary with current metadata
+        save.extend(skip)
+        result = {row['key']: row['value'] for row in save}
+    return result
 
 
 def _volume_user_metadata_get_query(context, volume_id, session=None):
@@ -1954,7 +1962,6 @@ def _volume_user_metadata_update(context, volume_id, metadata, delete,
                                  session=None):
     return _volume_x_metadata_update(context, volume_id, metadata, delete,
                                      models.VolumeMetadata,
-                                     exception.VolumeMetadataNotFound,
                                      session=session)
 
 
@@ -1964,7 +1971,6 @@ def _volume_image_metadata_update(context, volume_id, metadata, delete,
                                   session=None):
     return _volume_x_metadata_update(context, volume_id, metadata, delete,
                                      models.VolumeGlanceMetadata,
-                                     exception.GlanceMetadataNotFound,
                                      session=session)
 
 
@@ -2042,7 +2048,6 @@ def _volume_admin_metadata_update(context, volume_id, metadata, delete,
                                   session=None):
     return _volume_x_metadata_update(context, volume_id, metadata, delete,
                                      models.VolumeAdminMetadata,
-                                     exception.VolumeAdminMetadataNotFound,
                                      session=session)
 
 
@@ -4191,3 +4196,84 @@ def get_by_id(context, model, id, *args, **kwargs):
         _GET_METHODS[model] = _get_get_method(model)
 
     return _GET_METHODS[model](context, id, *args, **kwargs)
+
+
+def condition_db_filter(model, field, value):
+    """Create matching filter.
+
+    If value is an iterable other than a string, any of the values is
+    a valid match (OR), so we'll use SQL IN operator.
+
+    If it's not an iterator == operator will be used.
+    """
+    orm_field = getattr(model, field)
+    # For values that must match and are iterables we use IN
+    if (isinstance(value, collections.Iterable) and
+            not isinstance(value, six.string_types)):
+        # We cannot use in_ when one of the values is None
+        if None not in value:
+            return orm_field.in_(value)
+
+        return or_(orm_field == v for v in value)
+
+    # For values that must match and are not iterables we use ==
+    return orm_field == value
+
+
+def condition_not_db_filter(model, field, value, auto_none=True):
+    """Create non matching filter.
+
+    If value is an iterable other than a string, any of the values is
+    a valid match (OR), so we'll use SQL IN operator.
+
+    If it's not an iterator == operator will be used.
+
+    If auto_none is True then we'll consider NULL values as different as well,
+    like we do in Python and not like SQL does.
+    """
+    result = ~condition_db_filter(model, field, value)
+
+    if (auto_none
+            and ((isinstance(value, collections.Iterable) and
+                  not isinstance(value, six.string_types)
+                  and None not in value)
+                 or (value is not None))):
+        orm_field = getattr(model, field)
+        result = or_(result, orm_field.is_(None))
+
+    return result
+
+
+def is_orm_value(obj):
+    """Check if object is an ORM field or expression."""
+    return isinstance(obj, (sqlalchemy.orm.attributes.InstrumentedAttribute,
+                            sqlalchemy.sql.expression.ColumnElement))
+
+
+@_retry_on_deadlock
+@require_context
+def conditional_update(context, model, values, expected_values, filters=(),
+                       include_deleted='no', project_only=False):
+    """Compare-and-swap conditional update SQLAlchemy implementation."""
+    # Provided filters will become part of the where clause
+    where_conds = list(filters)
+
+    # Build where conditions with operators ==, !=, NOT IN and IN
+    for field, condition in expected_values.items():
+        if not isinstance(condition, db.Condition):
+            condition = db.Condition(condition, field)
+        where_conds.append(condition.get_filter(model, field))
+
+    # Transform case values
+    values = {field: case(value.whens, value.value, value.else_)
+              if isinstance(value, db.Case)
+              else value
+              for field, value in values.items()}
+
+    query = model_query(context, model, read_deleted=include_deleted,
+                        project_only=project_only)
+
+    # Return True if we were able to change any DB entry, False otherwise
+    result = query.filter(*where_conds).update(values,
+                                               synchronize_session=False)
+    return 0 != result
