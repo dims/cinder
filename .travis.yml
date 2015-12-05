@@ -1,6 +1,7 @@
 language: python
 env:
   - TOXENV=py27
+  - TOXENV=genconfig
 install:
   - travis_retry pip install tox
 script:
