@@ -598,13 +598,12 @@ class VolumeManager(manager.SchedulerDependentManager):
 
         context = context.elevated()
 
-        # FIXME(thangp): Remove this in v2.0 of RPC API.
-        if volume is not None:
-            volume_id = volume.id
-
         try:
-            # TODO(thangp): Replace with volume.refresh() when it is available
-            volume = objects.Volume.get_by_id(context, volume_id)
+            # FIXME(thangp): Remove this in v2.0 of RPC API.
+            if volume is None:
+                volume = objects.Volume.get_by_id(context, volume_id)
+            else:
+                volume.refresh()
         except exception.VolumeNotFound:
             # NOTE(thingee): It could be possible for a volume to
             # be deleted when resuming deletes from init_host().
@@ -1608,7 +1607,7 @@ class VolumeManager(manager.SchedulerDependentManager):
 
         # Create new volume on remote host
 
-        skip = {'id', '_name_id', 'name', 'host', 'status',
+        skip = {'id', '_name_id', 'name_id', 'name', 'host', 'status',
                 'attach_status', 'migration_status', 'volume_type',
                 'consistencygroup', 'volume_attachment'}
         # We don't copy volume_type, consistencygroup and volume_attachment,
@@ -2653,10 +2652,11 @@ class VolumeManager(manager.SchedulerDependentManager):
             # self.host is 'host@backend'
             # volume_ref['host'] is 'host@backend#pool'
             # Extract host before doing comparison
-            new_host = vol_utils.extract_host(volume_ref['host'])
-            if new_host != self.host:
-                raise exception.InvalidVolume(
-                    reason=_("Volume is not local to this node"))
+            if volume_ref['host']:
+                new_host = vol_utils.extract_host(volume_ref['host'])
+                if new_host != self.host:
+                    raise exception.InvalidVolume(
+                        reason=_("Volume is not local to this node"))
 
         self._notify_about_consistencygroup_usage(
             context, group, "delete.start")
