@@ -259,6 +259,7 @@ class VolumeTypeProjects(BASE, CinderBase):
     volume_type_id = Column(Integer, ForeignKey('volume_types.id'),
                             nullable=False)
     project_id = Column(String(255))
+    deleted = Column(Integer, default=0)
 
     volume_type = relationship(
         VolumeTypes,
@@ -266,7 +267,7 @@ class VolumeTypeProjects(BASE, CinderBase):
         foreign_keys=volume_type_id,
         primaryjoin='and_('
         'VolumeTypeProjects.volume_type_id == VolumeTypes.id,'
-        'VolumeTypeProjects.deleted == False)')
+        'VolumeTypeProjects.deleted == 0)')
 
 
 class VolumeTypeExtraSpecs(BASE, CinderBase):
@@ -541,6 +542,8 @@ class Backup(BASE, CinderBase):
     temp_volume_id = Column(String(36))
     temp_snapshot_id = Column(String(36))
     num_dependent_backups = Column(Integer)
+    snapshot_id = Column(String(36))
+    data_timestamp = Column(DateTime)
 
     @validates('fail_reason')
     def validate_fail_reason(self, key, fail_reason):

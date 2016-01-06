@@ -30,6 +30,7 @@ import six
 
 from cinder.api import common
 from cinder import context
+from cinder import db
 from cinder.db import base
 from cinder import exception
 from cinder import flow_utils
@@ -142,6 +143,8 @@ def valid_replication_volume(func):
 class API(base.Base):
     """API for interacting with the volume manager."""
 
+    AVAILABLE_MIGRATION_STATUS = (None, 'deleting', 'error', 'success')
+
     def __init__(self, db_driver=None, image_service=None):
         self.image_service = (image_service or
                               glance.get_default_image_service())
@@ -221,8 +224,8 @@ class API(base.Base):
         # fails to delete after a migration.
         # All of the statuses above means the volume is not in the process
         # of a migration.
-        return volume['migration_status'] not in (None, 'deleting',
-                                                  'error', 'success')
+        return (volume['migration_status'] not in
+                self.AVAILABLE_MIGRATION_STATUS)
 
     def create(self, context, size, name, description, snapshot=None,
                image_id=None, volume_type=None, metadata=None,
@@ -458,7 +461,7 @@ class API(base.Base):
 
         # NOTE(thangp): Update is called by various APIs, some of which are
         # not yet using oslo_versionedobjects.  We need to handle the case
-        # where volume is either a dict or a oslo_versionedobject.
+        # where volume is either a dict or an oslo_versionedobject.
         if isinstance(volume, objects_base.CinderObject):
             volume.update(fields)
             volume.save()
@@ -574,68 +577,57 @@ class API(base.Base):
 
     @wrap_check_policy
     def reserve_volume(self, context, volume):
-        # NOTE(jdg): check for Race condition bug 1096983
-        # explicitly get updated ref and check
-        volume = self.db.volume_get(context, volume['id'])
-        if volume['status'] == 'available':
-            self.update(context, volume, {"status": "attaching"})
-        elif volume['status'] == 'in-use':
-            if volume['multiattach']:
-                self.update(context, volume, {"status": "attaching"})
-            else:
-                msg = _("Volume must be multiattachable to reserve again.")
-                LOG.error(msg)
-                raise exception.InvalidVolume(reason=msg)
-        else:
-            msg = _("Volume status must be available to reserve.")
+        expected = {'multiattach': volume.multiattach,
+                    'status': (('available', 'in-use') if volume.multiattach
+                               else 'available')}
+
+        result = volume.conditional_update({'status': 'attaching'}, expected)
+
+        if not result:
+            expected_status = utils.build_or_str(expected['status'])
+            msg = _('Volume status must be %s to reserve.') % expected_status
             LOG.error(msg)
             raise exception.InvalidVolume(reason=msg)
+
         LOG.info(_LI("Reserve volume completed successfully."),
                  resource=volume)
 
     @wrap_check_policy
     def unreserve_volume(self, context, volume):
-        volume = self.db.volume_get(context, volume['id'])
-        if volume['status'] == 'attaching':
-            attaches = self.db.volume_attachment_get_used_by_volume_id(
-                context, volume['id'])
-            if attaches:
-                self.update(context, volume, {"status": "in-use"})
-            else:
-                self.update(context, volume, {"status": "available"})
+        expected = {'status': 'attaching'}
+        # Status change depends on whether it has attachments (in-use) or not
+        # (available)
+        value = {'status': db.Case([(db.volume_has_attachments_filter(),
+                                     'in-use')],
+                                   else_='available')}
+        volume.conditional_update(value, expected)
         LOG.info(_LI("Unreserve volume completed successfully."),
                  resource=volume)
 
     @wrap_check_policy
     def begin_detaching(self, context, volume):
-        # NOTE(vbala): The volume status might be 'detaching' already due to
-        # a previous begin_detaching call. Get updated volume status so that
-        # we fail such cases.
-        volume = self.db.volume_get(context, volume['id'])
-        # If we are in the middle of a volume migration, we don't want the user
-        # to see that the volume is 'detaching'. Having 'migration_status' set
-        # will have the same effect internally.
-        if self._is_volume_migrating(volume):
-            return
+        # If we are in the middle of a volume migration, we don't want the
+        # user to see that the volume is 'detaching'. Having
+        # 'migration_status' set will have the same effect internally.
+        expected = {'status': 'in-use',
+                    'attach_status': 'attached',
+                    'migration_status': self.AVAILABLE_MIGRATION_STATUS}
 
-        if (volume['status'] != 'in-use' or
-                volume['attach_status'] != 'attached'):
-            msg = (_("Unable to detach volume. Volume status must be 'in-use' "
-                     "and attach_status must be 'attached' to detach. "
-                     "Currently: status: '%(status)s', "
-                     "attach_status: '%(attach_status)s.'") %
-                   {'status': volume['status'],
-                    'attach_status': volume['attach_status']})
+        result = volume.conditional_update({'status': 'detaching'}, expected)
+
+        if not (result or self._is_volume_migrating(volume)):
+            msg = _("Unable to detach volume. Volume status must be 'in-use' "
+                    "and attach_status must be 'attached' to detach.")
             LOG.error(msg)
             raise exception.InvalidVolume(reason=msg)
-        self.update(context, volume, {"status": "detaching"})
+
         LOG.info(_LI("Begin detaching volume completed successfully."),
                  resource=volume)
 
     @wrap_check_policy
     def roll_detaching(self, context, volume):
-        if volume['status'] == "detaching":
-            self.update(context, volume, {"status": "in-use"})
+        volume.conditional_update({'status': 'in-use'},
+                                  {'status': 'detaching'})
         LOG.info(_LI("Roll detaching of volume completed successfully."),
                  resource=volume)
 
@@ -647,15 +639,13 @@ class API(base.Base):
                          'because it is in maintenance.'), resource=volume)
             msg = _("The volume cannot be attached in maintenance mode.")
             raise exception.InvalidVolume(reason=msg)
-        volume_metadata = self.get_volume_admin_metadata(context.elevated(),
-                                                         volume)
-        if 'readonly' not in volume_metadata:
-            # NOTE(zhiyan): set a default value for read-only flag to metadata.
-            self.update_volume_admin_metadata(context.elevated(), volume,
-                                              {'readonly': 'False'})
-            volume_metadata['readonly'] = 'False'
 
-        if volume_metadata['readonly'] == 'True' and mode != 'ro':
+        # We add readonly metadata if it doesn't already exist
+        readonly = self.update_volume_admin_metadata(context.elevated(),
+                                                     volume,
+                                                     {'readonly': 'False'},
+                                                     update=False)['readonly']
+        if readonly == 'True' and mode != 'ro':
             raise exception.InvalidVolumeAttachMode(mode=mode,
                                                     volume_id=volume['id'])
 
@@ -1069,7 +1059,7 @@ class API(base.Base):
 
     @wrap_check_policy
     def update_volume_admin_metadata(self, context, volume, metadata,
-                                     delete=False):
+                                     delete=False, add=True, update=True):
         """Updates or creates volume administration metadata.
 
         If delete is True, metadata items that are not specified in the
@@ -1078,7 +1068,8 @@ class API(base.Base):
         """
         self._check_metadata_properties(metadata)
         db_meta = self.db.volume_admin_metadata_update(context, volume['id'],
-                                                       metadata, delete)
+                                                       metadata, delete, add,
+                                                       update)
 
         # TODO(jdg): Implement an RPC call for drivers that may use this info
 
@@ -1503,8 +1494,29 @@ class API(base.Base):
         # We're checking here in so that we can report any quota issues as
         # early as possible, but won't commit until we change the type. We
         # pass the reservations onward in case we need to roll back.
-        reservations = quota_utils.get_volume_type_reservation(context, volume,
-                                                               vol_type_id)
+        reservations = quota_utils.get_volume_type_reservation(
+            context, volume, vol_type_id, reserve_vol_type_only=True)
+
+        # Get old reservations
+        try:
+            reserve_opts = {'volumes': -1, 'gigabytes': -volume.size}
+            QUOTAS.add_volume_type_opts(context,
+                                        reserve_opts,
+                                        old_vol_type_id)
+            # NOTE(wanghao): We don't need to reserve volumes and gigabytes
+            # quota for retyping operation since they didn't changed, just
+            # reserve volume_type and type gigabytes is fine.
+            reserve_opts.pop('volumes')
+            reserve_opts.pop('gigabytes')
+            old_reservations = QUOTAS.reserve(context,
+                                              project_id=volume.project_id,
+                                              **reserve_opts)
+        except Exception:
+            volume.status = volume.previous_status
+            volume.save()
+            msg = _("Failed to update quota usage while retyping volume.")
+            LOG.exception(msg, resource=volume)
+            raise exception.CinderException(msg)
 
         self.update(context, volume, {'status': 'retyping',
                                       'previous_status': volume.status})
@@ -1513,7 +1525,8 @@ class API(base.Base):
                         'volume_id': volume.id,
                         'volume_type': vol_type,
                         'migration_policy': migration_policy,
-                        'quota_reservations': reservations}
+                        'quota_reservations': reservations,
+                        'old_reservations': old_reservations}
 
         self.scheduler_rpcapi.retype(context, CONF.volume_topic, volume.id,
                                      request_spec=request_spec,
@@ -1594,7 +1607,7 @@ class API(base.Base):
 
     #  Replication V2 methods ##
 
-    # NOTE(jdg): It might be kinda silly to propogate the named
+    # NOTE(jdg): It might be kinda silly to propagate the named
     # args with defaults all the way down through rpc into manager
     # but for now the consistency is useful, and there may be
     # some usefulness in the future (direct calls in manager?)
@@ -1624,7 +1637,7 @@ class API(base.Base):
         # call to driver regardless of replication_status, most likely
         # this indicates an issue with the driver, but might be useful
         # cases to  consider modifying this for in the future.
-        valid_rep_status = ['disabled']
+        valid_rep_status = ['disabled', 'failed-over', 'error']
         rep_status = volume.get('replication_status', valid_rep_status[0])
 
         if rep_status not in valid_rep_status:

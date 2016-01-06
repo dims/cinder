@@ -243,6 +243,12 @@ volume_opts = [
                default=0,
                help='Max number of entries allowed in the image volume cache. '
                     '0 => unlimited.'),
+    cfg.BoolOpt('report_discard_supported',
+                default=False,
+                help='Report to clients of Cinder that the backend supports '
+                     'discard (aka. trim/unmap). This will not actually '
+                     'change the behavior of the backend or the client '
+                     'directly, it will only notify that it can be used.'),
 ]
 
 # for backward compatibility
@@ -1073,6 +1079,15 @@ class BaseVD(object):
 
     def backup_volume(self, context, backup, backup_service):
         """Create a new backup from an existing volume."""
+        # NOTE(xyang): _backup_volume_temp_snapshot and
+        # _backup_volume_temp_volume are splitted into two
+        # functions because there were concerns during code
+        # reviews that it is confusing to put all the logic
+        # into one function. There's a trade-off between
+        # reducing code duplication and increasing code
+        # readability here. Added a note here to explain why
+        # we've decided to have two separate functions as
+        # there will always be arguments from both sides.
         if self.backup_use_temp_snapshot():
             self._backup_volume_temp_snapshot(context, backup,
                                               backup_service)
@@ -1081,27 +1096,46 @@ class BaseVD(object):
                                             backup_service)
 
     def _backup_volume_temp_volume(self, context, backup, backup_service):
-        """Create a new backup from an existing volume.
+        """Create a new backup from an existing volume or snapshot.
 
-        For in-use volume, create a temp volume and back it up.
+        To backup a snapshot, create a temp volume from the snapshot and
+        back it up.
+
+        Otherwise to backup an in-use volume, create a temp volume and
+        back it up.
         """
         volume = self.db.volume_get(context, backup.volume_id)
+        snapshot = None
+        if backup.snapshot_id:
+            snapshot = objects.Snapshot.get_by_id(context, backup.snapshot_id)
 
         LOG.debug('Creating a new backup for volume %s.', volume['name'])
 
-        # NOTE(xyang): Check volume status; if 'in-use', create a temp
-        # volume from the source volume, backup the temp volume, and
-        # then clean up the temp volume; if 'available', just backup the
-        # volume.
-        previous_status = volume.get('previous_status', None)
-        device_to_backup = volume
         temp_vol_ref = None
-        if previous_status == "in-use":
-            temp_vol_ref = self._create_temp_cloned_volume(
-                context, volume)
+        device_to_backup = volume
+
+        # NOTE(xyang): If it is to backup from snapshot, create a temp
+        # volume from the source snapshot, backup the temp volume, and
+        # then clean up the temp volume.
+        if snapshot:
+            temp_vol_ref = self._create_temp_volume_from_snapshot(
+                context, volume, snapshot)
             backup.temp_volume_id = temp_vol_ref['id']
             backup.save()
             device_to_backup = temp_vol_ref
+
+        else:
+            # NOTE(xyang): Check volume status if it is not to backup from
+            # snapshot; if 'in-use', create a temp volume from the source
+            # volume, backup the temp volume, and then clean up the temp
+            # volume; if 'available', just backup the volume.
+            previous_status = volume.get('previous_status')
+            if previous_status == "in-use":
+                temp_vol_ref = self._create_temp_cloned_volume(
+                    context, volume)
+                backup.temp_volume_id = temp_vol_ref['id']
+                backup.save()
+                device_to_backup = temp_vol_ref
 
         self._backup_device(context, backup, backup_service, device_to_backup)
 
@@ -1111,28 +1145,42 @@ class BaseVD(object):
             backup.save()
 
     def _backup_volume_temp_snapshot(self, context, backup, backup_service):
-        """Create a new backup from an existing volume.
+        """Create a new backup from an existing volume or snapshot.
 
-        For in-use volume, create a temp snapshot and back it up.
+        If it is to backup from snapshot, back it up directly.
+
+        Otherwise for in-use volume, create a temp snapshot and back it up.
         """
         volume = self.db.volume_get(context, backup.volume_id)
+        snapshot = None
+        if backup.snapshot_id:
+            snapshot = objects.Snapshot.get_by_id(context, backup.snapshot_id)
 
         LOG.debug('Creating a new backup for volume %s.', volume['name'])
 
-        # NOTE(xyang): Check volume status; if 'in-use', create a temp
-        # snapshot from the source volume, backup the temp snapshot, and
-        # then clean up the temp snapshot; if 'available', just backup the
-        # volume.
-        previous_status = volume.get('previous_status', None)
         device_to_backup = volume
         is_snapshot = False
         temp_snapshot = None
-        if previous_status == "in-use":
-            temp_snapshot = self._create_temp_snapshot(context, volume)
-            backup.temp_snapshot_id = temp_snapshot.id
-            backup.save()
-            device_to_backup = temp_snapshot
+
+        # NOTE(xyang): If it is to backup from snapshot, back it up
+        # directly. No need to clean it up.
+        if snapshot:
+            device_to_backup = snapshot
             is_snapshot = True
+
+        else:
+            # NOTE(xyang): If it is not to backup from snapshot, check volume
+            # status. If the volume status is 'in-use', create a temp snapshot
+            # from the source volume, backup the temp snapshot, and then clean
+            # up the temp snapshot; if the volume status is 'available', just
+            # backup the volume.
+            previous_status = volume.get('previous_status')
+            if previous_status == "in-use":
+                temp_snapshot = self._create_temp_snapshot(context, volume)
+                backup.temp_snapshot_id = temp_snapshot.id
+                backup.save()
+                device_to_backup = temp_snapshot
+                is_snapshot = True
 
         self._backup_device(context, backup, backup_service, device_to_backup,
                             is_snapshot)
@@ -1246,6 +1294,27 @@ class BaseVD(object):
         temp_vol_ref = self.db.volume_create(context, temp_volume)
         try:
             self.create_cloned_volume(temp_vol_ref, volume)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                self.db.volume_destroy(context.elevated(),
+                                       temp_vol_ref['id'])
+
+        self.db.volume_update(context, temp_vol_ref['id'],
+                              {'status': 'available'})
+        return temp_vol_ref
+
+    def _create_temp_volume_from_snapshot(self, context, volume, snapshot):
+        temp_volume = {
+            'size': volume['size'],
+            'display_name': 'backup-vol-%s' % volume['id'],
+            'host': volume['host'],
+            'user_id': context.user_id,
+            'project_id': context.project_id,
+            'status': 'creating',
+        }
+        temp_vol_ref = self.db.volume_create(context, temp_volume)
+        try:
+            self.create_volume_from_snapshot(temp_vol_ref, snapshot)
         except Exception:
             with excutils.save_and_reraise_exception():
                 self.db.volume_destroy(context.elevated(),
@@ -1672,7 +1741,7 @@ class ReplicaV2VD(object):
 
         The replication_driver_data response is vendor unique,
         data returned/used by the driver.  It is expected that
-        the reponse from the driver is in the appropriate db update
+        the response from the driver is in the appropriate db update
         format, in the form of a dict, where the vendor data is
         stored under the key 'replication_driver_data'
 
@@ -1689,10 +1758,10 @@ class ReplicaV2VD(object):
         """Disable replication on the specified volume.
 
         If the specified volume is currently replication enabled,
-        this method can be used to disable the replciation process
+        this method can be used to disable the replication process
         on the backend.
 
-        Note that we still send this call to a driver whos volume
+        Note that we still send this call to a driver whose volume
         may report replication-disabled already.  We do this as a
         safety mechanism to allow a driver to cleanup any mismatch
         in state between Cinder and itself.
@@ -1708,7 +1777,7 @@ class ReplicaV2VD(object):
 
         The replication_driver_data response is vendor unique,
         data returned/used by the driver.  It is expected that
-        the reponse from the driver is in the appropriate db update
+        the response from the driver is in the appropriate db update
         format, in the form of a dict, where the vendor data is
         stored under the key 'replication_driver_data'
 
@@ -1734,7 +1803,7 @@ class ReplicaV2VD(object):
         the replication target is a configured cinder backend, we'll
         just update the host column for the volume.
 
-        Very important point here is that in the case of a succesful
+        Very important point here is that in the case of a successful
         failover, we want to update the replication_status of the
         volume to "failed-over".  This way there's an indication that
         things worked as expected, and that it's evident that the volume
@@ -1744,7 +1813,7 @@ class ReplicaV2VD(object):
         :param context: security context
         :param volume: volume object returned by DB
         :param secondary: Specifies rep target to fail over to
-        :response: dict of udpates
+        :response: dict of updates
 
         So the response would take the form:
             {host: <properly formatted host string for db update>,
@@ -1780,7 +1849,7 @@ class ReplicaV2VD(object):
 
         Example response for replicating to an unmanaged backend:
         {'volume_id': volume['id'],
-         'targets':[{'type': 'managed',
+         'targets':[{'type': 'unmanaged',
                      'vendor-key-1': 'value-1'}...]
 
         NOTE: It's the responsibility of the driver to mask out any

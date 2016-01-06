@@ -17,6 +17,7 @@ import mock
 from cinder.db.sqlalchemy import models
 from cinder import exception
 from cinder import objects
+from cinder.objects import fields
 from cinder.tests.unit import fake_volume
 from cinder.tests.unit import objects as test_objects
 from cinder.tests.unit import utils
@@ -25,7 +26,7 @@ from cinder.tests.unit import utils
 fake_backup = {
     'id': '1',
     'volume_id': 'fake_id',
-    'status': "creating",
+    'status': fields.BackupStatus.CREATING,
     'size': 1,
     'display_name': 'fake_name',
     'display_description': 'fake_description',
@@ -33,6 +34,8 @@ fake_backup = {
     'project_id': 'fake_project',
     'temp_volume_id': None,
     'temp_snapshot_id': None,
+    'snapshot_id': None,
+    'data_timestamp': None,
 }
 
 
@@ -84,6 +87,11 @@ class TestBackup(test_objects.BaseObjectsTestCase):
                                 temp_snapshot_id='3')
         self.assertEqual('2', backup.temp_volume_id)
         self.assertEqual('3', backup.temp_snapshot_id)
+
+    def test_obj_field_snapshot_id(self):
+        backup = objects.Backup(context=self.context,
+                                snapshot_id='2')
+        self.assertEqual('2', backup.snapshot_id)
 
     def test_import_record(self):
         utils.replace_obj_loader(self, objects.Backup)

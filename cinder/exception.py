@@ -971,6 +971,10 @@ class XtremIOArrayBusy(CinderException):
     message = _("System is busy, retry operation.")
 
 
+class XtremIOSnapshotsLimitExceeded(CinderException):
+    message = _("Exceeded the limit of snapshots per volume")
+
+
 # Infortrend EonStor DS Driver
 class InfortrendCliException(CinderException):
     message = _("Infortrend CLI exception: %(err)s Param: %(param)s "
@@ -1031,3 +1035,8 @@ class HNASConnError(CinderException):
 # Coho drivers
 class CohoException(VolumeDriverException):
     message = _("Coho Data Cinder driver failure: %(message)s")
+
+
+# Tegile Storage drivers
+class TegileAPIException(VolumeBackendAPIException):
+    message = _("Unexpected response from Tegile IntelliFlash API")

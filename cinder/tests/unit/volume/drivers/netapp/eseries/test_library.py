@@ -63,6 +63,10 @@ class NetAppEseriesLibraryTestCase(test.TestCase):
                   eseries_fake.create_configuration_eseries()}
 
         self.library = library.NetAppESeriesLibrary('FAKE', **kwargs)
+
+        # We don't want the looping calls to run
+        self.mock_object(self.library, '_start_periodic_tasks',
+                         new_attr=mock.Mock())
         # Deprecated Option
         self.library.configuration.netapp_storage_pools = None
         self.library._client = eseries_fake.FakeEseriesClient()
@@ -950,16 +954,8 @@ class NetAppEseriesLibraryTestCase(test.TestCase):
             eseries_fake.FAKE_ASUP_DATA['operating-mode'])
         self.library._app_version = eseries_fake.FAKE_APP_VERSION
         self.mock_object(
-            self.library._client, 'get_firmware_version',
-            mock.Mock(return_value=(
-                eseries_fake.FAKE_ASUP_DATA['system-version'])))
-        self.mock_object(
-            self.library._client, 'get_serial_numbers',
-            mock.Mock(return_value=eseries_fake.FAKE_SERIAL_NUMBERS))
-        self.mock_object(
-            self.library._client, 'get_model_name',
-            mock.Mock(
-                return_value=eseries_fake.FAKE_CONTROLLERS[0]['modelName']))
+            self.library._client, 'get_asup_info',
+            mock.Mock(return_value=eseries_fake.GET_ASUP_RETURN))
         self.mock_object(
             self.library._client, 'set_counter',
             mock.Mock(return_value={'value': 1}))
@@ -1072,6 +1068,11 @@ class NetAppEseriesLibraryMultiAttachTestCase(test.TestCase):
 
         self.library = library.NetAppESeriesLibrary("FAKE", **kwargs)
         self.library._client = eseries_fake.FakeEseriesClient()
+
+        # We don't want the looping calls to run
+        self.mock_object(self.library, '_start_periodic_tasks',
+                         new_attr=mock.Mock())
+
         with mock.patch('oslo_service.loopingcall.FixedIntervalLoopingCall',
                         new = cinder_utils.ZeroIntervalLoopingCall):
             self.library.check_for_setup_error()

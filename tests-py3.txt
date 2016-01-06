@@ -90,7 +90,7 @@ cinder.tests.unit.test_hitachi_hnas_backend
 cinder.tests.unit.test_hitachi_hnas_iscsi
 cinder.tests.unit.test_hitachi_hnas_nfs
 cinder.tests.unit.test_hpe3par
-cinder.tests.unit.test_hp_xp_fc
+cinder.tests.unit.test_hpe_xp_fc
 cinder.tests.unit.test_hpelefthand
 cinder.tests.unit.test_huawei_drivers
 cinder.tests.unit.test_huawei_drivers_compatibility
@@ -124,6 +124,7 @@ cinder.tests.unit.test_smbfs
 cinder.tests.unit.test_solidfire
 cinder.tests.unit.test_ssh_utils
 cinder.tests.unit.test_storwize_svc
+cinder.tests.unit.test_tegile
 cinder.tests.unit.test_test
 cinder.tests.unit.test_test_utils
 cinder.tests.unit.test_tintri
@@ -149,6 +150,7 @@ cinder.tests.unit.test_vzstorage
 cinder.tests.unit.test_xio
 cinder.tests.unit.test_zfssa
 cinder.tests.unit.volume.drivers.emc.scaleio
+cinder.tests.unit.volume.drivers.test_fujitsu
 cinder.tests.unit.volume.flows.test_create_volume_flow
 cinder.tests.unit.windows.test_smbfs
 cinder.tests.unit.windows.test_vhdutils
@@ -156,3 +158,13 @@ cinder.tests.unit.windows.test_windows
 cinder.tests.unit.windows.test_windows_remotefs
 cinder.tests.unit.windows.test_windows_utils
 cinder.tests.unit.wsgi
+cinder.tests.unit.zonemanager.test_brcd_fc_san_lookup_service
+cinder.tests.unit.zonemanager.test_brcd_fc_zone_client_cli
+cinder.tests.unit.zonemanager.test_brcd_fc_zone_driver
+cinder.tests.unit.zonemanager.test_brcd_lookup_service
+cinder.tests.unit.zonemanager.test_cisco_fc_san_lookup_service
+cinder.tests.unit.zonemanager.test_cisco_fc_zone_client_cli
+cinder.tests.unit.zonemanager.test_cisco_fc_zone_driver
+cinder.tests.unit.zonemanager.test_cisco_lookup_service
+cinder.tests.unit.zonemanager.test_fc_zone_manager
+cinder.tests.unit.zonemanager.test_volume_driver

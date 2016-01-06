@@ -112,9 +112,13 @@ CONF.register_opts(volume_manager_opts)
 
 MAPPING = {
     'cinder.volume.drivers.huawei.huawei_18000.Huawei18000ISCSIDriver':
-    'cinder.volume.drivers.huawei.huawei_driver.Huawei18000ISCSIDriver',
+    'cinder.volume.drivers.huawei.huawei_driver.HuaweiISCSIDriver',
+    'cinder.volume.drivers.huawei.huawei_driver.Huawei18000ISCSIDriver':
+    'cinder.volume.drivers.huawei.huawei_driver.HuaweiISCSIDriver',
     'cinder.volume.drivers.huawei.huawei_18000.Huawei18000FCDriver':
-    'cinder.volume.drivers.huawei.huawei_driver.Huawei18000FCDriver',
+    'cinder.volume.drivers.huawei.huawei_driver.HuaweiFCDriver',
+    'cinder.volume.drivers.huawei.huawei_driver.Huawei18000FCDriver':
+    'cinder.volume.drivers.huawei.huawei_driver.HuaweiFCDriver',
     'cinder.volume.drivers.fujitsu_eternus_dx_fc.FJDXFCDriver':
     'cinder.volume.drivers.fujitsu.eternus_dx_fc.FJDXFCDriver',
     'cinder.volume.drivers.fujitsu_eternus_dx_iscsi.FJDXISCSIDriver':
@@ -129,6 +133,8 @@ MAPPING = {
     'cinder.volume.drivers.hpe.hpe_3par_iscsi.HPE3PARISCSIDriver',
     'cinder.volume.drivers.san.hp.hp_lefthand_iscsi.HPLeftHandISCSIDriver':
     'cinder.volume.drivers.hpe.hpe_lefthand_iscsi.HPELeftHandISCSIDriver',
+    'cinder.volume.drivers.san.hp.hp_xp_fc.HPXPFCDriver':
+    'cinder.volume.drivers.hpe.hpe_xp_fc.HPEXPFCDriver',
 }
 
 
@@ -197,7 +203,7 @@ def locked_snapshot_operation(f):
 class VolumeManager(manager.SchedulerDependentManager):
     """Manages attachable block storage devices."""
 
-    RPC_API_VERSION = '1.36'
+    RPC_API_VERSION = '1.37'
 
     target = messaging.Target(version=RPC_API_VERSION)
 
@@ -1073,11 +1079,11 @@ class VolumeManager(manager.SchedulerDependentManager):
         reserve_opts = {'volumes': 1, 'gigabytes': volume.size}
         QUOTAS.add_volume_type_opts(ctx, reserve_opts, volume_type_id)
         reservations = QUOTAS.reserve(ctx, **reserve_opts)
-
         try:
             new_vol_values = dict(volume.items())
             new_vol_values.pop('id', None)
             new_vol_values.pop('_name_id', None)
+            new_vol_values.pop('name_id', None)
             new_vol_values.pop('volume_type', None)
             new_vol_values.pop('name', None)
 
@@ -1122,7 +1128,7 @@ class VolumeManager(manager.SchedulerDependentManager):
                           {'volume_id': volume.id,
                            'image_id': image_meta['id']})
             try:
-                self.delete_volume(ctx, image_volume)
+                self.delete_volume(ctx, image_volume.id)
             except exception.CinderException:
                 LOG.exception(_LE('Could not delete the image volume %(id)s.'),
                               {'id': volume.id})
@@ -1406,6 +1412,14 @@ class VolumeManager(manager.SchedulerDependentManager):
         if conn_info['data'].get('encrypted') is None:
             encrypted = bool(volume.get('encryption_key_id'))
             conn_info['data']['encrypted'] = encrypted
+
+        # Add discard flag to connection_info if not set in the driver and
+        # configured to be reported.
+        if conn_info['data'].get('discard') is None:
+            discard_supported = (self.driver.configuration
+                                 .safe_get('report_discard_supported'))
+            if discard_supported:
+                conn_info['data']['discard'] = True
 
         LOG.info(_LI("Initialize volume connection completed successfully."),
                  resource=volume)
@@ -2069,7 +2083,8 @@ class VolumeManager(manager.SchedulerDependentManager):
                  resource=volume)
 
     def retype(self, ctxt, volume_id, new_type_id, host,
-               migration_policy='never', reservations=None, volume=None):
+               migration_policy='never', reservations=None,
+               volume=None, old_reservations=None):
 
         def _retype_error(context, volume, old_reservations,
                           new_reservations, status_update):
@@ -2108,22 +2123,31 @@ class VolumeManager(manager.SchedulerDependentManager):
                 volume.update(status_update)
                 volume.save()
 
-        # Get old reservations
-        try:
-            reserve_opts = {'volumes': -1, 'gigabytes': -volume.size}
-            QUOTAS.add_volume_type_opts(context,
-                                        reserve_opts,
-                                        volume.volume_type_id)
-            old_reservations = QUOTAS.reserve(context,
-                                              project_id=project_id,
-                                              **reserve_opts)
-        except Exception:
-            volume.update(status_update)
-            volume.save()
-            LOG.exception(_LE("Failed to update usages "
-                              "while retyping volume."))
-            raise exception.CinderException(_("Failed to get old volume type"
-                                              " quota reservations"))
+        # If old_reservations has been passed in from the API, we should
+        # skip quotas.
+        # TODO(ntpttr): These reservation checks are left in to be backwards
+        #               compatible with Liberty and can be removed in N.
+        if not old_reservations:
+            # Get old reservations
+            try:
+                reserve_opts = {'volumes': -1, 'gigabytes': -volume.size}
+                QUOTAS.add_volume_type_opts(context,
+                                            reserve_opts,
+                                            volume.volume_type_id)
+                # NOTE(wanghao): We don't need to reserve volumes and gigabytes
+                # quota for retyping operation since they didn't changed, just
+                # reserve volume_type and type gigabytes is fine.
+                reserve_opts.pop('volumes')
+                reserve_opts.pop('gigabytes')
+                old_reservations = QUOTAS.reserve(context,
+                                                  project_id=project_id,
+                                                  **reserve_opts)
+            except Exception:
+                volume.update(status_update)
+                volume.save()
+                msg = _("Failed to update quota usage while retyping volume.")
+                LOG.exception(msg, resource=volume)
+                raise exception.CinderException(msg)
 
         # We already got the new reservations
         new_reservations = reservations
@@ -3192,7 +3216,18 @@ class VolumeManager(manager.SchedulerDependentManager):
         except exception.CinderException:
             err_msg = (_("Enable replication for volume failed."))
             LOG.exception(err_msg, resource=volume)
+            self.db.volume_update(context,
+                                  volume['id'],
+                                  {'replication_status': 'error'})
             raise exception.VolumeBackendAPIException(data=err_msg)
+
+        except Exception:
+            msg = _('enable_replication caused exception in driver.')
+            LOG.exception(msg, resource=volume)
+            self.db.volume_update(context,
+                                  volume['id'],
+                                  {'replication_status': 'error'})
+            raise exception.VolumeBackendAPIException(data=msg)
 
         try:
             if rep_driver_data:
@@ -3241,7 +3276,19 @@ class VolumeManager(manager.SchedulerDependentManager):
         except exception.CinderException:
             err_msg = (_("Disable replication for volume failed."))
             LOG.exception(err_msg, resource=volume)
+            self.db.volume_update(context,
+                                  volume['id'],
+                                  {'replication_status': 'error'})
             raise exception.VolumeBackendAPIException(data=err_msg)
+
+        except Exception:
+            msg = _('disable_replication caused exception in driver.')
+            LOG.exception(msg, resource=volume)
+            self.db.volume_update(context,
+                                  volume['id'],
+                                  {'replication_status': 'error'})
+            raise exception.VolumeBackendAPIException(msg)
+
         try:
             if rep_driver_data:
                 volume = self.db.volume_update(context,
@@ -3250,6 +3297,9 @@ class VolumeManager(manager.SchedulerDependentManager):
         except exception.CinderException as ex:
             LOG.exception(_LE("Driver replication data update failed."),
                           resource=volume)
+            self.db.volume_update(context,
+                                  volume['id'],
+                                  {'replication_status': 'error'})
             raise exception.VolumeBackendAPIException(reason=ex)
         self.db.volume_update(context,
                               volume['id'],
@@ -3283,6 +3333,13 @@ class VolumeManager(manager.SchedulerDependentManager):
         # not being able to talk to the primary array that it's configured
         # to manage.
 
+        if volume['replication_status'] != 'enabling_secondary':
+            msg = (_("Unable to failover replication due to invalid "
+                     "replication status: %(status)s.") %
+                   {'status': volume['replication_status']})
+            LOG.error(msg, resource=volume)
+            raise exception.InvalidVolume(reason=msg)
+
         try:
             volume = self.db.volume_get(context, volume['id'])
             model_update = self.driver.replication_failover(context,
@@ -3315,6 +3372,14 @@ class VolumeManager(manager.SchedulerDependentManager):
                                   {'replication_status': 'error'})
             raise exception.VolumeBackendAPIException(data=err_msg)
 
+        except Exception:
+            msg = _('replication_failover caused exception in driver.')
+            LOG.exception(msg, resource=volume)
+            self.db.volume_update(context,
+                                  volume['id'],
+                                  {'replication_status': 'error'})
+            raise exception.VolumeBackendAPIException(msg)
+
         if model_update:
             try:
                 volume = self.db.volume_update(
@@ -3325,12 +3390,15 @@ class VolumeManager(manager.SchedulerDependentManager):
             except exception.CinderException as ex:
                 LOG.exception(_LE("Driver replication data update failed."),
                               resource=volume)
+                self.db.volume_update(context,
+                                      volume['id'],
+                                      {'replication_status': 'error'})
                 raise exception.VolumeBackendAPIException(reason=ex)
 
         # NOTE(jdg): We're setting replication status to failed-over
-        # which indicates the volume is ok, things went as epected but
+        # which indicates the volume is ok, things went as expected but
         # we're likely not replicating any longer because... well we
-        # did a fail-over.  In the case of admin brining primary
+        # did a fail-over.  In the case of admin bringing primary
         # back online he/she can use enable_replication to get this
         # state set back to enabled.
 

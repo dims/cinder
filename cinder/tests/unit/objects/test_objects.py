@@ -21,12 +21,12 @@ from cinder import test
 # NOTE: The hashes in this list should only be changed if they come with a
 # corresponding version bump in the affected objects.
 object_data = {
-    'Backup': '1.1-cd077ec037f5ad1f5409fd660bd59f53',
-    'BackupImport': '1.1-cd077ec037f5ad1f5409fd660bd59f53',
+    'Backup': '1.3-2e63492190bbbc85c0e5bea328cd38f7',
+    'BackupImport': '1.3-2e63492190bbbc85c0e5bea328cd38f7',
     'BackupList': '1.0-24591dabe26d920ce0756fe64cd5f3aa',
     'CGSnapshot': '1.0-190da2a2aa9457edc771d888f7d225c4',
     'CGSnapshotList': '1.0-e8c3f4078cd0ee23487b34d173eec776',
-    'ConsistencyGroup': '1.0-b9bad093daee0b259edddb3993c60c31',
+    'ConsistencyGroup': '1.1-8d8b867a67c1bd6e9f840bcf5e375dbb',
     'ConsistencyGroupList': '1.0-09d0aad5491e762ecfdf66bef02ceb8d',
     'Service': '1.0-64baeb4911dbab1153064dd1c87edb9f',
     'ServiceList': '1.0-d242d3384b68e5a5a534e090ff1d5161',

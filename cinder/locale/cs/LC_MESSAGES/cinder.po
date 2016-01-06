@@ -9,10 +9,10 @@
 # Zbyněk Schwarz <zbynek.schwarz@gmail.com>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: cinder 8.0.0.0b2.dev107\n"
+"Project-Id-Version: cinder 8.0.0.0b2.dev138\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2015-12-19 06:26+0000\n"
-"PO-Revision-Date: 2015-12-18 10:27+0000\n"
+"POT-Creation-Date: 2015-12-23 06:26+0000\n"
+"PO-Revision-Date: 2015-12-22 03:18+0000\n"
 "Last-Translator: Zbyněk Schwarz <zbynek.schwarz@gmail.com>\n"
 "Language: cs\n"
 "Language-Team: Czech\n"
@@ -209,6 +209,10 @@ msgstr "%s není nainstalováno."
 #, python-format
 msgid "%s is not set"
 msgstr "%s není nastaveno"
+
+#, python-format
+msgid "%s is not set and is required for the replicaiton device to be valid."
+msgstr "%s není nastaveno a pro platnost zařízení replikace je povinné."
 
 #, python-format
 msgid "%s is not set."
@@ -955,6 +959,9 @@ msgstr ""
 msgid "Cannot delete encryption specs. Volume type in use."
 msgstr "Nelze smazat specifikace šifrování. Typ svazku se používá."
 
+msgid "Cannot determine storage pool settings."
+msgstr "Nelze zjistit typ nastavení zásoby úložiště."
+
 msgid "Cannot execute /sbin/mount.sofs"
 msgstr "Nelze spustit /sbin/mount.sofs"
 
@@ -1613,6 +1620,9 @@ msgstr "Nelze zjistit verzi API Data ONTAP."
 
 msgid "Data ONTAP operating in 7-Mode does not support QoS policy groups."
 msgstr "Data ONTAP pracuje v režimu 7, který nepodporuje skupiny zásad QoS."
+
+msgid "Database schema downgrade is not allowed."
+msgstr "Snížení verze schématu databáze na nižší verzi není povoleno."
 
 #, python-format
 msgid ""
@@ -2586,6 +2596,9 @@ msgid ""
 msgstr ""
 "Překročen maximální počet pokusů %(max_attempts)d pro svazek %(volume_id)s."
 
+msgid "Exceeded the limit of snapshots per volume"
+msgstr "Překročeno omezení snímků na svazek"
+
 #, python-format
 msgid "Exception appending meta volume to target volume %(volumename)s."
 msgstr ""
@@ -2793,10 +2806,6 @@ msgstr ""
 "meta' již existuje"
 
 #, python-format
-msgid "Failed to clone %s because it is a snapshot mount point."
-msgstr "Nelze klonovat %s protože je to bod připojení snímku."
-
-#, python-format
 msgid "Failed to clone volume from snapshot %s."
 msgstr "Nelze klonovat svazek ze snímku %s."
 
@@ -2878,14 +2887,6 @@ msgid ""
 msgstr ""
 "Nelze vytvořit skupinu jednotnosti %s protože skupina jednotnosti VNX nemůže "
 "přijmout komprimované LUN jako členy."
-
-#, python-format
-msgid ""
-"Failed to create consistency group %s because VNX consistency group cannot "
-"enable copytype:snap=True on its members."
-msgstr ""
-"Nelze vytvořit skupinu jednotnosti %s protože skupina jednotnosti VNX nemůže "
-"povolit copytype:snap=True u svých členů."
 
 #, python-format
 msgid "Failed to create consistency group: %(cgName)s."
@@ -2972,10 +2973,6 @@ msgstr "Nelze vytvořit snímek pro skupinu jednotnosti: %(cgName)s."
 #, python-format
 msgid "Failed to create snapshot for volume %s."
 msgstr "Nelze vytvořit snímek pro svazek %s."
-
-#, python-format
-msgid "Failed to create snapshot of %s because it is a snapshot mount point."
-msgstr "Nelze vytvořit snímek %s protože je to bod připojení snímku."
 
 #, python-format
 msgid "Failed to create snapshot policy on volume %(vol)s: %(res)s."
@@ -3229,9 +3226,6 @@ msgstr "Nelze získat informace o síti."
 #, python-format
 msgid "Failed to get new part id in new pool: %(pool_id)s."
 msgstr "Nelze získat nové id části v nové zásobě: %(pool_id)s."
-
-msgid "Failed to get old volume type quota reservations"
-msgstr "Nelze získat rezervace kvót starého typu svazku"
 
 msgid "Failed to get partition info."
 msgstr "Nelze získat informace o oddílu."
@@ -3555,6 +3549,9 @@ msgid "Failed to update qos_specs: %(specs_id)s with specs %(qos_specs)s."
 msgstr ""
 "Nelze aktualizovat specifikace qos: %(specs_id)s se specifikacemi "
 "%(qos_specs)s."
+
+msgid "Failed to update quota usage while retyping volume."
+msgstr "Nelze aktualizovat využití kvóty při přetypování svazku."
 
 #, python-format
 msgid "Failed updating model with driver provided model %(model)s"
@@ -4178,7 +4175,7 @@ msgstr "Vstupní nebo zdrojové svazky jsou neplatné."
 
 #, python-format
 msgid "Instance %(uuid)s could not be found."
-msgstr "Instance %(uuid)s nemohla být nastavena."
+msgstr "Instance %(uuid)s nemohla být nalezena."
 
 msgid "Insufficient free space available to extend volume."
 msgstr "Pro rozšíření svazku není dostatek volného místa."
@@ -5748,6 +5745,9 @@ msgstr ""
 msgid "Received error string: %s"
 msgstr "Obdržen chybový řetězec: %s"
 
+msgid "Reference must be for an unmanaged snapshot."
+msgstr "Odkaz musí být pro nespravovaný snímek."
+
 msgid "Reference must be for an unmanaged virtual volume."
 msgstr "Odkaz musí být pro nespravovaný virtuální svazek."
 
@@ -6158,6 +6158,10 @@ msgstr ""
 "Snímek %(snapshot_id)s nemá žádná popisná data mající klíč %(metadata_key)s."
 
 #, python-format
+msgid "Snapshot '%s' doesn't exist on array."
+msgstr "Snímek '%s' neexistuje v poli."
+
+#, python-format
 msgid ""
 "Snapshot cannot be created because volume %(vol_id)s is not available, "
 "current volume status: %(vol_status)s."
@@ -6427,6 +6431,14 @@ msgstr ""
 
 #, python-format
 msgid ""
+"The array does not support the storage pool setting for SLO %(slo)s and "
+"workload %(workload)s.  Please check the array for valid SLOs and workloads."
+msgstr ""
+"Pole nepodporuje nastavení zásoby úložiště pro SLO %(slo)s a zatížení "
+"%(workload)s. Prosím zkontrolujte pole pro platné SLO a zatížení."
+
+#, python-format
+msgid ""
 "The command %(cmd)s failed. (ret: %(ret)s, stdout: %(out)s, stderr: %(err)s)"
 msgstr ""
 "Příkaz %(cmd)s selhal.  (ret: %(ret)s, standardní výstup: %(out)s, chybový "
@@ -6461,6 +6473,10 @@ msgstr "Dodatečná specifikace %s je neplatná."
 msgid "The extraspec: %(extraspec)s is not valid."
 msgstr "Dodatečná specifikace: %(extraspec)s není platná."
 
+#, python-format
+msgid "The failed-over volume could not be deleted: %s"
+msgstr "Záložní svazek nelze smazat: %s."
+
 msgid "The failover array cannot be the primary array."
 msgstr "Záložní pole nemůže být hlavní."
 
@@ -6474,10 +6490,10 @@ msgstr "Jsou vyžadovány následující prvky: %s"
 
 #, python-format
 msgid ""
-"The following migrations are missing a downgrade:\n"
+"The following migrations have a downgrade, which are not allowed: \n"
 "\t%s"
 msgstr ""
-"Následujícím přesunům chybí snížení na nižší verzi:\n"
+"Následující přesuny mají snížení na nižší verzi, což není povoleno:\n"
 "\t%s"
 
 msgid "The host group or iSCSI target could not be added."
@@ -6524,6 +6540,10 @@ msgstr ""
 
 msgid "The parent backup must be available for incremental backup."
 msgstr "Pro provedení přírůstkové zálohy musí být dostupná nadřazená záloha."
+
+#, python-format
+msgid "The provided snapshot '%s' is not a snapshot of the provided volume."
+msgstr "Zadaný snímek '%s' není snímek zadaného svazku."
 
 msgid ""
 "The reference to the volume in the backend should have the format "
@@ -7983,9 +8003,6 @@ msgstr "Název typu svazku nemůže být prázdný."
 #, python-format
 msgid "Volume type with name %(volume_type_name)s could not be found."
 msgstr "Typ svazku s názvem %(volume_type_name)s nemohl být nalezen."
-
-msgid "Volume with copytype:snap=True can not be put in consistency group."
-msgstr "Svazek s copytype:snap=True nemůže být přidán do skupiny jednotnosti."
 
 #, python-format
 msgid "Volume with volume id %s does not exist."

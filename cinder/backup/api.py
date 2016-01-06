@@ -19,11 +19,14 @@
 Handles all requests relating to the volume backups service.
 """
 
+from datetime import datetime
+
 from eventlet import greenthread
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import strutils
+from pytz import timezone
 
 from cinder.backup import rpcapi as backup_rpcapi
 from cinder import context
@@ -31,6 +34,7 @@ from cinder.db import base
 from cinder import exception
 from cinder.i18n import _, _LI, _LW
 from cinder import objects
+from cinder.objects import fields
 import cinder.policy
 from cinder import quota
 from cinder import utils
@@ -80,7 +84,8 @@ class API(base.Base):
         :raises: ServiceNotFound
         """
         check_policy(context, 'delete')
-        if not force and backup.status not in ['available', 'error']:
+        if not force and backup.status not in [fields.BackupStatus.AVAILABLE,
+                                               fields.BackupStatus.ERROR]:
             msg = _('Backup status must be available or error')
             raise exception.InvalidBackup(reason=msg)
         if force and not self._check_support_to_force_delete(context,
@@ -98,7 +103,7 @@ class API(base.Base):
             msg = _('Incremental backups exist for this backup.')
             raise exception.InvalidBackup(reason=msg)
 
-        backup.status = 'deleting'
+        backup.status = fields.BackupStatus.DELETING
         backup.save()
         self.backup_rpcapi.delete_backup(context, backup)
 
@@ -150,20 +155,28 @@ class API(base.Base):
 
     def create(self, context, name, description, volume_id,
                container, incremental=False, availability_zone=None,
-               force=False):
+               force=False, snapshot_id=None):
         """Make the RPC call to create a volume backup."""
         check_policy(context, 'create')
         volume = self.volume_api.get(context, volume_id)
+        snapshot = None
+        if snapshot_id:
+            snapshot = self.volume_api.get_snapshot(context, snapshot_id)
 
         if volume['status'] not in ["available", "in-use"]:
             msg = (_('Volume to be backed up must be available '
                      'or in-use, but the current status is "%s".')
                    % volume['status'])
             raise exception.InvalidVolume(reason=msg)
-        elif volume['status'] in ["in-use"] and not force:
+        elif volume['status'] in ["in-use"] and not snapshot_id and not force:
             msg = _('Backing up an in-use volume must use '
                     'the force flag.')
             raise exception.InvalidVolume(reason=msg)
+        elif snapshot_id and snapshot['status'] not in ["available"]:
+            msg = (_('Snapshot to be backed up must be available, '
+                     'but the current status is "%s".')
+                   % snapshot['status'])
+            raise exception.InvalidSnapshot(reason=msg)
 
         previous_status = volume['status']
         volume_host = volume_utils.extract_host(volume['host'], 'host')
@@ -208,15 +221,36 @@ class API(base.Base):
                     raise exception.BackupLimitExceeded(
                         allowed=quotas[over])
 
-        # Find the latest backup of the volume and use it as the parent
-        # backup to do an incremental backup.
+        # Find the latest backup and use it as the parent backup to do an
+        # incremental backup.
         latest_backup = None
         if incremental:
             backups = objects.BackupList.get_all_by_volume(context.elevated(),
                                                            volume_id)
             if backups.objects:
-                latest_backup = max(backups.objects,
-                                    key=lambda x: x['created_at'])
+                # NOTE(xyang): The 'data_timestamp' field records the time
+                # when the data on the volume was first saved. If it is
+                # a backup from volume, 'data_timestamp' will be the same
+                # as 'created_at' for a backup. If it is a backup from a
+                # snapshot, 'data_timestamp' will be the same as
+                # 'created_at' for a snapshot.
+                # If not backing up from snapshot, the backup with the latest
+                # 'data_timestamp' will be the parent; If backing up from
+                # snapshot, the backup with the latest 'data_timestamp' will
+                # be chosen only if 'data_timestamp' is earlier than the
+                # 'created_at' timestamp of the snapshot; Otherwise, the
+                # backup will not be chosen as the parent.
+                # For example, a volume has a backup taken at 8:00, then
+                # a snapshot taken at 8:10, and then a backup at 8:20.
+                # When taking an incremental backup of the snapshot, the
+                # parent should be the backup at 8:00, not 8:20, and the
+                # 'data_timestamp' of this new backup will be 8:10.
+                latest_backup = max(
+                    backups.objects,
+                    key=lambda x: x['data_timestamp']
+                    if (not snapshot or (snapshot and x['data_timestamp']
+                                         < snapshot['created_at']))
+                    else datetime(1, 1, 1, 1, 1, 1, tzinfo=timezone('UTC')))
             else:
                 msg = _('No backups available to do an incremental backup.')
                 raise exception.InvalidBackup(reason=msg)
@@ -224,10 +258,15 @@ class API(base.Base):
         parent_id = None
         if latest_backup:
             parent_id = latest_backup.id
-            if latest_backup['status'] != "available":
+            if latest_backup['status'] != fields.BackupStatus.AVAILABLE:
                 msg = _('The parent backup must be available for '
                         'incremental backup.')
                 raise exception.InvalidBackup(reason=msg)
+
+        data_timestamp = None
+        if snapshot_id:
+            snapshot = objects.Snapshot.get_by_id(context, snapshot_id)
+            data_timestamp = snapshot.created_at
 
         self.db.volume_update(context, volume_id,
                               {'status': 'backing-up',
@@ -239,14 +278,19 @@ class API(base.Base):
                 'display_name': name,
                 'display_description': description,
                 'volume_id': volume_id,
-                'status': 'creating',
+                'status': fields.BackupStatus.CREATING,
                 'container': container,
                 'parent_id': parent_id,
                 'size': volume['size'],
                 'host': volume_host,
+                'snapshot_id': snapshot_id,
+                'data_timestamp': data_timestamp,
             }
             backup = objects.Backup(context=context, **kwargs)
             backup.create()
+            if not snapshot_id:
+                backup.data_timestamp = backup.created_at
+                backup.save()
             QUOTAS.commit(context, reservations)
         except Exception:
             with excutils.save_and_reraise_exception():
@@ -266,7 +310,7 @@ class API(base.Base):
         """Make the RPC call to restore a volume backup."""
         check_policy(context, 'restore')
         backup = self.get(context, backup_id)
-        if backup['status'] != 'available':
+        if backup['status'] != fields.BackupStatus.AVAILABLE:
             msg = _('Backup status must be available')
             raise exception.InvalidBackup(reason=msg)
 
@@ -317,7 +361,7 @@ class API(base.Base):
 
         # Setting the status here rather than setting at start and unrolling
         # for each error condition, it should be a very small window
-        backup.status = 'restoring'
+        backup.status = fields.BackupStatus.RESTORING
         backup.save()
         volume_host = volume_utils.extract_host(volume['host'], 'host')
         self.db.volume_update(context, volume_id, {'status':
@@ -360,7 +404,7 @@ class API(base.Base):
         """
         check_policy(context, 'backup-export')
         backup = self.get(context, backup_id)
-        if backup['status'] != 'available':
+        if backup['status'] != fields.BackupStatus.AVAILABLE:
             msg = (_('Backup status must be available and not %s.') %
                    backup['status'])
             raise exception.InvalidBackup(reason=msg)
@@ -407,7 +451,7 @@ class API(base.Base):
             'user_id': context.user_id,
             'project_id': context.project_id,
             'volume_id': '0000-0000-0000-0000',
-            'status': 'creating',
+            'status': fields.BackupStatus.CREATING,
         }
 
         try:
@@ -420,7 +464,7 @@ class API(base.Base):
 
             # If record exists and it's not deleted we cannot proceed with the
             # import
-            if backup.status != 'deleted':
+            if backup.status != fields.BackupStatus.DELETED:
                 msg = _('Backup already exists in database.')
                 raise exception.InvalidBackup(reason=msg)
 
