@@ -75,6 +75,7 @@ MIN_REP_CLIENT_VERSION = '4.0.2'
 DEDUP_API_VERSION = 30201120
 FLASH_CACHE_API_VERSION = 30201200
 SRSTATLD_API_VERSION = 30201200
+REMOTE_COPY_API_VERSION = 30202290
 
 hpe3par_opts = [
     cfg.StrOpt('hpe3par_api_url',
@@ -219,10 +220,12 @@ class HPE3PARCommon(object):
         3.0.5 - Adds v2 unmanaged replication support
         3.0.6 - Adding manage/unmanage snapshot support
         3.0.7 - Enable standard capabilities based on 3PAR licenses
+        3.0.8 - Optimize array ID retrieval
+        3.0.9 - Bump minimum API version for volume replication
 
     """
 
-    VERSION = "3.0.7"
+    VERSION = "3.0.9"
 
     stats = {}
 
@@ -378,7 +381,7 @@ class HPE3PARCommon(object):
         if client is not None:
             client.logout()
 
-    def do_setup(self, context, volume=None, timeout=None):
+    def do_setup(self, context, volume=None, timeout=None, stats=None):
         if hpe3parclient is None:
             msg = _('You must install hpe3parclient before using 3PAR'
                     ' drivers. Run "pip install python-3parclient" to'
@@ -394,6 +397,19 @@ class HPE3PARCommon(object):
             self.client = self._create_client(timeout=timeout)
             wsapi_version = self.client.getWsApiVersion()
             self.API_VERSION = wsapi_version['build']
+
+            # If replication is properly configured, the primary array's
+            # API version must meet the minimum requirements.
+            if self._replication_enabled and (
+               self.API_VERSION < REMOTE_COPY_API_VERSION):
+                self._replication_enabled = False
+                msg = (_LE("The primary array must have an API version of "
+                           "%(min_ver)s or higher, but is only on "
+                           "%(current_ver)s, therefore replication is not "
+                           "supported.") %
+                       {'min_ver': REMOTE_COPY_API_VERSION,
+                        'current_ver': self.API_VERSION})
+                LOG.error(msg)
         except hpeexceptions.UnsupportedVersion as ex:
             # In the event we cannot contact the configured primary array,
             # we want to allow a failover if replication is enabled.
@@ -430,15 +446,19 @@ class HPE3PARCommon(object):
             LOG.error(msg)
             raise exception.InvalidInput(message=msg)
 
-        # get the client ID for provider_location
-        try:
-            self.client_login()
-            info = self.client.getStorageSystemInfo()
-            self.client.id = six.text_type(info['id'])
-        except Exception:
-            self.client.id = 0
-        finally:
-            self.client_logout()
+        # Get the client ID for provider_location. We only need to retrieve
+        # the ID directly from the array if the driver stats are not provided.
+        if not stats:
+            try:
+                self.client_login()
+                info = self.client.getStorageSystemInfo()
+                self.client.id = six.text_type(info['id'])
+            except Exception:
+                self.client.id = 0
+            finally:
+                self.client_logout()
+        else:
+            self.client.id = stats['array_id']
 
     def check_for_setup_error(self):
         if self.client:
@@ -1267,6 +1287,7 @@ class HPE3PARCommon(object):
                       'storage_protocol': None,
                       'vendor_name': 'Hewlett Packard Enterprise',
                       'volume_backend_name': None,
+                      'array_id': info['id'],
                       'pools': pools}
 
     def _check_license_enabled(self, valid_licenses,
@@ -2949,9 +2970,9 @@ class HPE3PARCommon(object):
                     dev.get('hpe3par_iscsi_chap_enabled') == 'True')
                 array_name = remote_array['target_device_id']
 
-                # Make sure we can log into the client, that it has been
-                # correctly configured, and it its version matches the
-                # primary arrarys version.
+                # Make sure we can log into the array, that it has been
+                # correctly configured, and its API version meets the
+                # minimum requirement.
                 cl = None
                 try:
                     cl = self._create_replication_client(remote_array)
@@ -2959,17 +2980,15 @@ class HPE3PARCommon(object):
                     remote_array['id'] = array_id
                     wsapi_version = cl.getWsApiVersion()['build']
 
-                    if self.client is not None and (
-                       wsapi_version != self.API_VERSION):
-                        msg = (_LW("The target array and all of its secondary "
-                                   "arrays must be on the same API version. "
-                                   "Array '%(target)s' is on %(target_ver)s "
-                                   "while the primary array is on "
-                                   "%(primary_ver)s, therefore it will not "
-                                   "be added as a valid replication target.") %
+                    if wsapi_version < REMOTE_COPY_API_VERSION:
+                        msg = (_LW("The secondary array must have an API "
+                                   "version of %(min_ver)s or higher. Array "
+                                   "'%(target)s' is on %(target_ver)s, "
+                                   "therefore it will not be added as a valid "
+                                   "replication target.") %
                                {'target': array_name,
-                                'target_ver': wsapi_version,
-                                'primary_ver': self.API_VERSION})
+                                'min_ver': REMOTE_COPY_API_VERSION,
+                                'target_ver': wsapi_version})
                         LOG.warning(msg)
                     elif not self._is_valid_replication_array(remote_array):
                         msg = (_LW("'%s' is not a valid replication array. "

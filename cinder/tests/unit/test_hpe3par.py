@@ -546,8 +546,13 @@ class HPE3PARBaseDriver(object):
                                      'minor': 4,
                                      'revision': 2}
 
+    wsapi_version_for_remote_copy = {'major': 1,
+                                     'build': 30202290,
+                                     'minor': 5,
+                                     'revision': 0}
+
     # Use this to point to latest version of wsapi
-    wsapi_version_latest = wsapi_version_for_flash_cache
+    wsapi_version_latest = wsapi_version_for_remote_copy
 
     standard_login = [
         mock.call.login(HPE3PAR_USER_NAME, HPE3PAR_USER_PASS),
@@ -5247,6 +5252,7 @@ class TestHPE3PARFCDriver(HPE3PARBaseDriver, test.TestCase):
             stats = self.driver.get_volume_stats(True)
             const = 0.0009765625
             self.assertEqual('FC', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
             self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
             self.assertFalse(stats['pools'][0]['QoS_support'])
@@ -5290,6 +5296,7 @@ class TestHPE3PARFCDriver(HPE3PARBaseDriver, test.TestCase):
                 self.standard_logout)
             stats = self.driver.get_volume_stats(True)
             self.assertEqual('FC', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
             self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
             self.assertFalse(stats['pools'][0]['QoS_support'])
@@ -5322,6 +5329,7 @@ class TestHPE3PARFCDriver(HPE3PARBaseDriver, test.TestCase):
 
             stats = self.driver.get_volume_stats(True)
             self.assertEqual('FC', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
             self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
             self.assertFalse(stats['pools'][0]['QoS_support'])
@@ -5399,6 +5407,7 @@ class TestHPE3PARFCDriver(HPE3PARBaseDriver, test.TestCase):
 
             stats = self.driver.get_volume_stats(True)
             self.assertEqual('FC', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertFalse(stats['pools'][0]['thin_provisioning_support'])
             self.assertTrue(stats['pools'][0]['QoS_support'])
             self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
@@ -5459,6 +5468,7 @@ class TestHPE3PARFCDriver(HPE3PARBaseDriver, test.TestCase):
 
             stats = self.driver.get_volume_stats(True)
             self.assertEqual('FC', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
             self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
             self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
@@ -6008,6 +6018,7 @@ class TestHPE3PARISCSIDriver(HPE3PARBaseDriver, test.TestCase):
             stats = self.driver.get_volume_stats(True)
             const = 0.0009765625
             self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
             self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
             self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
@@ -6055,6 +6066,7 @@ class TestHPE3PARISCSIDriver(HPE3PARBaseDriver, test.TestCase):
 
             stats = self.driver.get_volume_stats(True)
             self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertTrue(stats['pools'][0]['thin_provisioning_support'])
             self.assertTrue(stats['pools'][0]['thick_provisioning_support'])
             total_capacity_gb = 8192 * const
@@ -6122,6 +6134,7 @@ class TestHPE3PARISCSIDriver(HPE3PARBaseDriver, test.TestCase):
 
             stats = self.driver.get_volume_stats(True)
             self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
             self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
             self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
@@ -6180,6 +6193,7 @@ class TestHPE3PARISCSIDriver(HPE3PARBaseDriver, test.TestCase):
 
             stats = self.driver.get_volume_stats(True)
             self.assertEqual('iSCSI', stats['storage_protocol'])
+            self.assertEqual('12345', stats['array_id'])
             self.assertEqual(24.0, stats['pools'][0]['total_capacity_gb'])
             self.assertEqual(3.0, stats['pools'][0]['free_capacity_gb'])
             self.assertEqual(87.5, stats['pools'][0]['capacity_utilization'])
