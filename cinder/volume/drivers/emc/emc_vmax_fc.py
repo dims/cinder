@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import ast
+
 from oslo_log import log as logging
 import six
 
@@ -49,6 +51,7 @@ class EMCVMAXFCDriver(driver.FibreChannelDriver):
               - Proper error handling for invalid SLOs (bug #1512795)
               - Extend Volume for VMAX3, SE8.1.0.3
               https://blueprints.launchpad.net/cinder/+spec/vmax3-extend-volume
+              - Incorrect SG selected on an attach (#1515176)
     """
 
     VERSION = "2.3.0"
@@ -203,7 +206,7 @@ class EMCVMAXFCDriver(driver.FibreChannelDriver):
         data = {'driver_volume_type': 'fibre_channel',
                 'data': {}}
         loc = volume['provider_location']
-        name = eval(loc)
+        name = ast.literal_eval(loc)
         storage_system = name['keybindings']['SystemName']
         LOG.debug("Start FC detach process for volume: %(volume)s.",
                   {'volume': volume['name']})
