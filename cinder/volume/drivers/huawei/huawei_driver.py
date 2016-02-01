@@ -1142,6 +1142,103 @@ class HuaweiBaseDriver(driver.VolumeDriver):
             raise exception.VolumeBackendAPIException(data=msg)
         return int(size)
 
+    def _check_snapshot_valid_for_manage(self, snapshot_info, external_ref):
+        snapshot_id = snapshot_info.get('ID')
+
+        # Check whether the snapshot is normal.
+        if snapshot_info.get('HEALTHSTATUS') != constants.STATUS_HEALTH:
+            msg = _("Can't import snapshot %s to Cinder. "
+                    "Snapshot status is not normal"
+                    " or running status is not online.") % snapshot_id
+            raise exception.ManageExistingInvalidReference(
+                existing_ref=external_ref, reason=msg)
+
+        if snapshot_info.get('EXPOSEDTOINITIATOR') != 'false':
+            msg = _("Can't import snapshot %s to Cinder. "
+                    "Snapshot is exposed to initiator.") % snapshot_id
+            raise exception.ManageExistingInvalidReference(
+                existing_ref=external_ref, reason=msg)
+
+    def _get_snapshot_info_by_ref(self, external_ref):
+        LOG.debug("Get snapshot external_ref: %s.", external_ref)
+        name = external_ref.get('source-name')
+        id = external_ref.get('source-id')
+        if not (name or id):
+            msg = _('Must specify snapshot source-name or source-id.')
+            raise exception.ManageExistingInvalidReference(
+                existing_ref=external_ref, reason=msg)
+
+        snapshot_id = id or self.client.get_snapshot_id_by_name(name)
+        if not snapshot_id:
+            msg = _("Can't find snapshot on array, please check the "
+                    "source-name or source-id.")
+            raise exception.ManageExistingInvalidReference(
+                existing_ref=external_ref, reason=msg)
+
+        snapshot_info = self.client.get_snapshot_info(snapshot_id)
+        return snapshot_info
+
+    def manage_existing_snapshot(self, snapshot, existing_ref):
+        snapshot_info = self._get_snapshot_info_by_ref(existing_ref)
+        snapshot_id = snapshot_info.get('ID')
+        volume = snapshot.get('volume')
+        lun_id = volume.get('provider_location')
+        if lun_id != snapshot_info.get('PARENTID'):
+            msg = (_("Can't import snapshot %s to Cinder. "
+                     "Snapshot doesn't belong to volume."), snapshot_id)
+            raise exception.ManageExistingInvalidReference(
+                existing_ref=existing_ref, reason=msg)
+
+        # Check whether this snapshot can be imported.
+        self._check_snapshot_valid_for_manage(snapshot_info, existing_ref)
+
+        # Rename the snapshot to make it manageable for Cinder.
+        description = snapshot['id']
+        snapshot_name = huawei_utils.encode_name(snapshot['id'])
+        self.client.rename_snapshot(snapshot_id, snapshot_name, description)
+        if snapshot_info.get('RUNNINGSTATUS') != constants.STATUS_ACTIVE:
+            self.client.activate_snapshot(snapshot_id)
+
+        LOG.debug("Rename snapshot %(old_name)s to %(new_name)s.",
+                  {'old_name': snapshot_info.get('NAME'),
+                   'new_name': snapshot_name})
+
+        return {'provider_location': snapshot_id}
+
+    def manage_existing_snapshot_get_size(self, snapshot, existing_ref):
+        """Get the size of the existing snapshot."""
+        snapshot_info = self._get_snapshot_info_by_ref(existing_ref)
+        size = (float(snapshot_info.get('USERCAPACITY'))
+                // constants.CAPACITY_UNIT)
+        remainder = (float(snapshot_info.get('USERCAPACITY'))
+                     % constants.CAPACITY_UNIT)
+        if int(remainder) > 0:
+            msg = _("Snapshot size must be multiple of 1 GB.")
+            raise exception.VolumeBackendAPIException(data=msg)
+        return int(size)
+
+    def unmanage_snapshot(self, snapshot):
+        """Unmanage the specified snapshot from Cinder management."""
+        LOG.debug("Unmanage snapshot: %s.", snapshot['id'])
+        snapshot_name = huawei_utils.encode_name(snapshot['id'])
+        snapshot_id = self.client.get_snapshot_id_by_name(snapshot_name)
+        if not snapshot_id:
+            LOG.warning(_LW("Can't find snapshot on the array: %s."),
+                        snapshot_name)
+            return
+        new_name = 'unmged_' + snapshot_name
+        LOG.debug("Rename snapshot %(snapshot_name)s to %(new_name)s.",
+                  {'snapshot_name': snapshot_name,
+                   'new_name': new_name})
+
+        try:
+            self.client.rename_snapshot(snapshot_id, new_name)
+        except Exception:
+            LOG.warning(_LW("Failed to rename snapshot %(snapshot_id)s, "
+                            "snapshot name on array is %(snapshot_name)s."),
+                        {'snapshot_id': snapshot['id'],
+                         'snapshot_name': snapshot_name})
+
 
 class HuaweiISCSIDriver(HuaweiBaseDriver, driver.ISCSIDriver):
     """ISCSI driver for Huawei storage arrays.
@@ -1159,9 +1256,10 @@ class HuaweiISCSIDriver(HuaweiBaseDriver, driver.ISCSIDriver):
         2.0.0 - Rename to HuaweiISCSIDriver
         2.0.1 - Manage/unmanage volume support
         2.0.2 - Refactor HuaweiISCSIDriver
+        2.0.3 - Manage/unmanage snapshot support
     """
 
-    VERSION = "2.0.2"
+    VERSION = "2.0.3"
 
     def __init__(self, *args, **kwargs):
         super(HuaweiISCSIDriver, self).__init__(*args, **kwargs)
@@ -1352,13 +1450,15 @@ class HuaweiFCDriver(HuaweiBaseDriver, driver.FibreChannelDriver):
         2.0.0 - Rename to HuaweiFCDriver
         2.0.1 - Manage/unmanage volume support
         2.0.2 - Refactor HuaweiFCDriver
+        2.0.3 - Manage/unmanage snapshot support
+        2.0.4 - Balanced FC port selection
     """
 
-    VERSION = "2.0.2"
+    VERSION = "2.0.4"
 
     def __init__(self, *args, **kwargs):
         super(HuaweiFCDriver, self).__init__(*args, **kwargs)
-        self.fcsan_lookup_service = None
+        self.fcsan = None
 
     def get_volume_stats(self, refresh=False):
         """Get volume status."""
@@ -1382,23 +1482,23 @@ class HuaweiFCDriver(HuaweiBaseDriver, driver.FibreChannelDriver):
              'volume': volume_name},)
 
         lun_id = self.client.get_lun_id(volume, volume_name)
+        portg_id = None
 
         original_host_name = connector['host']
         host_name = huawei_utils.encode_host_name(original_host_name)
         host_id = self.client.add_host_with_check(host_name,
                                                   original_host_name)
 
-        if not self.fcsan_lookup_service:
-            self.fcsan_lookup_service = fczm_utils.create_lookup_service()
+        if not self.fcsan:
+            self.fcsan = fczm_utils.create_lookup_service()
 
-        if self.fcsan_lookup_service:
+        if self.fcsan:
             # Use FC switch.
-            host_id = self.client.add_host_with_check(
-                host_name, original_host_name)
-            zone_helper = fc_zone_helper.FCZoneHelper(
-                self.fcsan_lookup_service, self.client)
-            (tgt_port_wwns, init_targ_map) = (
-                zone_helper.build_ini_targ_map(wwns))
+            host_id = self.client.add_host_with_check(host_name,
+                                                      original_host_name)
+            zone_helper = fc_zone_helper.FCZoneHelper(self.fcsan, self.client)
+            (tgt_port_wwns, portg_id, init_targ_map) = (
+                zone_helper.build_ini_targ_map(wwns, host_id, lun_id))
             for ini in init_targ_map:
                 self.client.ensure_fc_initiator_added(ini, host_id)
         else:
@@ -1431,9 +1531,8 @@ class HuaweiFCDriver(HuaweiBaseDriver, driver.FibreChannelDriver):
 
         # Add host into hostgroup.
         hostgroup_id = self.client.add_host_to_hostgroup(host_id)
-        map_info = self.client.do_mapping(lun_id,
-                                          hostgroup_id,
-                                          host_id)
+        map_info = self.client.do_mapping(lun_id, hostgroup_id,
+                                          host_id, portg_id)
         host_lun_id = self.client.get_host_lun_id(host_id, lun_id)
 
         # Return FC properties.
@@ -1555,15 +1654,16 @@ class HuaweiFCDriver(HuaweiBaseDriver, driver.FibreChannelDriver):
             fc_info = {'driver_volume_type': 'fibre_channel',
                        'data': {}}
         else:
-            if not self.fcsan_lookup_service:
-                self.fcsan_lookup_service = fczm_utils.create_lookup_service()
+            portg_id = None
+            if not self.fcsan:
+                self.fcsan = fczm_utils.create_lookup_service()
 
-            if self.fcsan_lookup_service:
-                zone_helper = fc_zone_helper.FCZoneHelper(
-                    self.fcsan_lookup_service, self.client)
+            if self.fcsan:
+                zone_helper = fc_zone_helper.FCZoneHelper(self.fcsan,
+                                                          self.client)
 
-                (tgt_port_wwns, init_targ_map) = (
-                    zone_helper.build_ini_targ_map(wwns))
+                (tgt_port_wwns, portg_id, init_targ_map) = (
+                    zone_helper.get_init_targ_map(wwns, host_id))
             else:
                 (tgt_port_wwns, init_targ_map) = (
                     self.client.get_init_targ_map(wwns))
@@ -1577,6 +1677,12 @@ class HuaweiFCDriver(HuaweiBaseDriver, driver.FibreChannelDriver):
                     self.client.delete_lungroup_mapping_view(view_id,
                                                              lungroup_id)
                 self.client.delete_lungroup(lungroup_id)
+            if portg_id:
+                if view_id and self.client.is_portgroup_associated_to_view(
+                        view_id, portg_id):
+                    self.client.delete_portgroup_mapping_view(view_id,
+                                                              portg_id)
+                    self.client.delete_portgroup(portg_id)
 
             if host_id:
                 hostgroup_name = constants.HOSTGROUP_PREFIX + host_id

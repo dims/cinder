@@ -1008,7 +1008,16 @@ FAKE_GET_FC_PORT_RESPONSE = """
     "data":[{
         "RUNNINGSTATUS":"10",
         "WWN":"2000643e8c4c5f66",
-        "PARENTID":"0A.1"
+        "PARENTID":"0A.1",
+        "ID": "1114368",
+        "RUNSPEED": "16000"
+    },
+    {
+        "RUNNINGSTATUS":"10",
+        "WWN":"2009643e8c4c5f67",
+        "PARENTID":"0A.1",
+        "ID": "1114369",
+        "RUNSPEED": "16000"
     }]
 }
 """
@@ -1391,6 +1400,190 @@ MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroPair?range=[0-100]/GET'] = (
 MAP_COMMAND_TO_FAKE_RESPONSE['/splitmirror?range=[0-100]/GET'] = (
     FAKE_COMMON_SUCCESS_RESPONSE)
 
+FACK_GET_PORTG_BY_VIEW = """
+{
+    "data": [{
+        "DESCRIPTION": "Please do NOT modify this. Engine ID: 0",
+        "ID": "0",
+        "NAME": "OpenStack_PortGroup_1",
+        "TYPE": 257
+    }],
+    "error": {
+        "code": 0
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/portgroup/associate/mappingview?TYPE=257&AS'
+                             'SOCIATEOBJTYPE=245&ASSOCIATEOBJID=1/GET'] = (
+    FACK_GET_PORTG_BY_VIEW)
+
+FACK_GET_PORT_BY_PORTG = """
+{
+    "data":[{
+        "CONFSPEED":"0","FCCONFMODE":"3",
+        "FCRUNMODE":"0","HEALTHSTATUS":"1","ID":"2000643e8c4c5f66",
+        "MAXSUPPORTSPEED":"16000","NAME":"P0","PARENTID":"0B.1",
+        "PARENTTYPE":209,"RUNNINGSTATUS":"10","RUNSPEED":"8000",
+        "WWN":"2000643e8c4c5f66"
+    }],
+    "error":{
+        "code":0,"description":"0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/fc_port/associate/portgroup?TYPE=212&ASSOCI'
+                             'ATEOBJTYPE=257&ASSOCIATEOBJID=0/GET'] = (
+    FACK_GET_PORT_BY_PORTG)
+
+FACK_GET_PORTG = """
+{
+    "data": {
+        "TYPE": 257,
+        "NAME": "OpenStack_PortGroup_1",
+        "DESCRIPTION": "Please DO NOT change thefollowing message: 0",
+        "ID": "0"
+    },
+    "error": {
+        "code": 0,
+        "description": "0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/portgroup/0/GET'] = FACK_GET_PORTG
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/portgroup/0/PUT'] = FACK_GET_PORTG
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/port/associate/portgroup/POST'] = (
+    FACK_GET_PORT_BY_PORTG)
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/port/associate/portgroup?ID=0&TYPE=257&ASSOCIA'
+                             'TEOBJTYPE=212&ASSOCIATEOBJID=2000643e8c4c5f66/DE'
+                             'LETE'] = (
+    FAKE_COMMON_SUCCESS_RESPONSE)
+
+FAKE_CREATE_PORTG = """
+{
+    "data": {
+        "DESCRIPTION": "Please DO NOT change the following message: 0",
+        "ID": "0",
+        "NAME": "OpenStack_PortGroup_1",
+        "TYPE": 257
+    },
+    "error": {
+        "code": 0,
+        "description": "0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/PortGroup/POST'] = FAKE_CREATE_PORTG
+
+
+FAKE_GET_PORTG_FROM_PORT = """
+{
+    "data": [{
+        "TYPE": 257,
+        "NAME": "OpenStack_PortGroup_1",
+        "DESCRIPTION": "PleaseDONOTchangethefollowingmessage: 0",
+        "ID": "0"
+    }],
+    "error": {
+        "code": 0,
+        "description": "0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/portgroup/associate/fc_port?TYPE=257&ASSOCIA'
+                             'TEOBJTYPE=212&ASSOCIATEOBJID=1114368/GET'] = (
+    FAKE_GET_PORTG_FROM_PORT)
+
+FACK_GET_VIEW_BY_PORTG = """
+{
+    "data": [{
+        "ASSOCIATEOBJID": "0",
+        "COUNT": "0",
+        "ASSOCIATEOBJTYPE": "0",
+        "INBANDLUNWWN": "",
+        "FORFILESYSTEM": "false",
+        "ID": "2",
+        "ENABLEINBANDCOMMAND": "false",
+        "NAME": "OpenStack_Mapping_View_1",
+        "WORKMODE": "0",
+        "TYPE": 245,
+        "HOSTLUNID": "0",
+        "DESCRIPTION": ""
+    }],
+    "error": {
+        "code": 0,
+        "description": "0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/mappingview/associate/portgroup?TYPE=245&ASS'
+                             'OCIATEOBJTYPE=257&ASSOCIATEOBJID=0/GET'] = (
+    FACK_GET_VIEW_BY_PORTG)
+
+FACK_GET_LUNG_BY_VIEW = """
+{
+    "data": [{
+        "TYPE": 256,
+        "NAME": "OpenStack_LunGroup_1",
+        "DESCRIPTION": "OpenStack_LunGroup_1",
+        "ID": "1"
+    }],
+    "error": {
+        "code": 0,
+        "description": "0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/lungroup/associate/mappingview?TYPE=256&ASSO'
+                             'CIATEOBJTYPE=245&ASSOCIATEOBJID=2/GET'] = (
+    FACK_GET_LUNG_BY_VIEW)
+
+FAKE_LUN_COUNT_RESPONSE_1 = """
+{
+    "data":{
+        "COUNT":"2"
+    },
+    "error":{
+        "code":0,
+        "description":"0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/lun/count?TYPE=11&ASSOCIATEOB'
+                             'JTYPE=256&ASSOCIATEOBJID=1/GET'] = (
+    FAKE_LUN_COUNT_RESPONSE_1)
+
+FAKE_PORTS_IN_PG_RESPONSE = """
+{
+    "data": [{
+        "ID": "1114114",
+        "WWN": "2002643e8c4c5f66"
+    },
+    {
+        "ID": "1114113",
+        "WWN": "2001643e8c4c5f66"
+    }],
+    "error": {
+        "code": 0,
+        "description": "0"
+    }
+}
+"""
+
+MAP_COMMAND_TO_FAKE_RESPONSE['/fc_port/associate?TYPE=213&ASSOCIATEOBJTYPE='
+                             '257&ASSOCIATEOBJID=0/GET'] = (
+    FAKE_PORTS_IN_PG_RESPONSE)
+
 
 def Fake_sleep(time):
     pass
@@ -1530,7 +1723,7 @@ class FakeFCStorage(huawei_driver.HuaweiFCDriver):
 
     def __init__(self, configuration):
         self.configuration = configuration
-        self.fcsan_lookup_service = None
+        self.fcsan = None
         self.db = FakeDB()
         self.huawei_conf = FakeHuaweiConf(self.configuration, 'iSCSI')
 
@@ -1640,7 +1833,7 @@ class HuaweiISCSIDriverTestCase(test.TestCase):
 
     def test_get_volume_status(self):
         data = self.driver.get_volume_stats()
-        self.assertEqual('2.0.2', data['driver_version'])
+        self.assertEqual('2.0.3', data['driver_version'])
 
     def test_extend_volume(self):
         lun_info = self.driver.extend_volume(test_volume, 3)
@@ -2162,6 +2355,159 @@ class HuaweiISCSIDriverTestCase(test.TestCase):
             self.driver.unmanage(test_volume)
             self.assertEqual(ddt_data[1], mock_rename.call_count)
 
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_info',
+                       return_value={'ID': 'ID1',
+                                     'NAME': 'test1',
+                                     'PARENTID': '12',
+                                     'USERCAPACITY': 2097152,
+                                     'HEALTHSTATUS': '2'})
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_id_by_name',
+                       return_value='ID1')
+    def test_manage_existing_snapshot_abnormal(self, mock_get_by_name,
+                                               mock_get_info):
+        with mock.patch.object(huawei_driver.HuaweiBaseDriver,
+                               '_get_snapshot_info_by_ref',
+                               return_value={'HEALTHSTATUS': '2',
+                                             'PARENTID': '12'}):
+            test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf',
+                             'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                             'volume': {'provider_location': '12'}}
+            external_ref = {'source-name': 'test1'}
+            ex = self.assertRaises(exception.ManageExistingInvalidReference,
+                                   self.driver.manage_existing_snapshot,
+                                   test_snapshot, external_ref)
+            self.assertIsNotNone(re.search('Snapshot status is not normal',
+                                           ex.msg))
+
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_info',
+                       return_value={'ID': 'ID1',
+                                     'EXPOSEDTOINITIATOR': 'true',
+                                     'NAME': 'test1',
+                                     'PARENTID': '12',
+                                     'USERCAPACITY': 2097152,
+                                     'HEALTHSTATUS': constants.STATUS_HEALTH})
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_id_by_name',
+                       return_value='ID1')
+    def test_manage_existing_snapshot_with_lungroup(self, mock_get_by_name,
+                                                    mock_get_info):
+        # Already in LUN group.
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'volume': {'provider_location': '12'}}
+        external_ref = {'source-name': 'test1'}
+        ex = self.assertRaises(exception.ManageExistingInvalidReference,
+                               self.driver.manage_existing_snapshot,
+                               test_snapshot, external_ref)
+        self.assertIsNotNone(re.search('Snapshot is exposed to initiator',
+                                       ex.msg))
+
+    @mock.patch.object(rest_client.RestClient, 'rename_snapshot')
+    @mock.patch.object(huawei_driver.HuaweiBaseDriver,
+                       '_get_snapshot_info_by_ref',
+                       return_value={'ID': 'ID1',
+                                     'EXPOSEDTOINITIATOR': 'false',
+                                     'NAME': 'test1',
+                                     'PARENTID': '12',
+                                     'USERCAPACITY': 2097152,
+                                     'HEALTHSTATUS': constants.STATUS_HEALTH})
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_info',
+                       return_value={'ID': 'ID1',
+                                     'EXPOSEDTOINITIATOR': 'false',
+                                     'NAME': 'test1',
+                                     'PARENTID': '12',
+                                     'USERCAPACITY': 2097152,
+                                     'HEALTHSTATUS': constants.STATUS_HEALTH})
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_id_by_name',
+                       return_value='ID1')
+    def test_manage_existing_snapshot_success(self, mock_get_by_name,
+                                              mock_get_info,
+                                              mock_check_snapshot,
+                                              mock_rename):
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'volume': {'provider_location': '12'}}
+        external_ref = {'source-name': 'test1'}
+        model_update = self.driver.manage_existing_snapshot(test_snapshot,
+                                                            external_ref)
+        self.assertEqual({'provider_location': 'ID1'}, model_update)
+
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'volume': {'provider_location': '12'}}
+        external_ref = {'source-id': 'ID1'}
+        model_update = self.driver.manage_existing_snapshot(test_snapshot,
+                                                            external_ref)
+        self.assertEqual({'provider_location': 'ID1'}, model_update)
+
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_info',
+                       return_value={'ID': 'ID1',
+                                     'EXPOSEDTOINITIATOR': 'false',
+                                     'NAME': 'test1',
+                                     'USERCAPACITY': 2097152,
+                                     'PARENTID': '11',
+                                     'HEALTHSTATUS': constants.STATUS_HEALTH})
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_id_by_name',
+                       return_value='ID1')
+    def test_manage_existing_snapshot_mismatch_lun(self, mock_get_by_name,
+                                                   mock_get_info):
+        external_ref = {'source-name': 'test1'}
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'volume': {'provider_location': '12'}}
+        ex = self.assertRaises(exception.ManageExistingInvalidReference,
+                               self.driver.manage_existing_snapshot,
+                               test_snapshot, external_ref)
+        self.assertIsNotNone(re.search("Snapshot doesn't belong to volume",
+                                       ex.msg))
+
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_info',
+                       return_value={'USERCAPACITY': 2097152})
+    @mock.patch.object(rest_client.RestClient, 'get_snapshot_id_by_name',
+                       return_value='ID1')
+    def test_manage_existing_snapshot_get_size_success(self,
+                                                       mock_get_id_by_name,
+                                                       mock_get_info):
+        external_ref = {'source-name': 'test1',
+                        'source-id': 'ID1'}
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'volume': {'provider_location': '12'}}
+        size = self.driver.manage_existing_snapshot_get_size(test_snapshot,
+                                                             external_ref)
+        self.assertEqual(1, size)
+
+        external_ref = {'source-name': 'test1'}
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'volume': {'provider_location': '12'}}
+        size = self.driver.manage_existing_snapshot_get_size(test_snapshot,
+                                                             external_ref)
+        self.assertEqual(1, size)
+
+        external_ref = {'source-id': 'ID1'}
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'volume': {'provider_location': '12'}}
+        size = self.driver.manage_existing_snapshot_get_size(test_snapshot,
+                                                             external_ref)
+        self.assertEqual(1, size)
+
+    @mock.patch.object(rest_client.RestClient, 'rename_snapshot')
+    def test_unmanage_snapshot(self, mock_rename):
+        test_snapshot = {'volume_id': '21ec7341-9256-497b-97d9-ef48edcf0635',
+                         'id': '21ec7341-9256-497b-97d9-ef48edcf0635'}
+        with mock.patch.object(rest_client.RestClient,
+                               'get_snapshot_id_by_name',
+                               return_value=None):
+            self.driver.unmanage_snapshot(test_snapshot)
+            self.assertEqual(0, mock_rename.call_count)
+
+        with mock.patch.object(rest_client.RestClient,
+                               'get_snapshot_id_by_name',
+                               return_value='ID1'):
+            self.driver.unmanage_snapshot(test_snapshot)
+            self.assertEqual(1, mock_rename.call_count)
+
 
 class FCSanLookupService(object):
 
@@ -2236,7 +2582,7 @@ class HuaweiFCDriverTestCase(test.TestCase):
     def test_get_volume_status(self):
 
         data = self.driver.get_volume_stats()
-        self.assertEqual('2.0.2', data['driver_version'])
+        self.assertEqual('2.0.4', data['driver_version'])
 
     def test_extend_volume(self):
 
@@ -2461,37 +2807,60 @@ class HuaweiFCDriverTestCase(test.TestCase):
                                     test_new_type, None, test_host)
         self.assertFalse(retype)
 
-    def test_build_ini_targ_map(self):
-
+    @mock.patch.object(rest_client.RestClient, 'get_all_engines',
+                       return_value=[{'NODELIST': '["0A","0B"]', 'ID': '0'}])
+    def test_build_ini_targ_map_engie_recorded(self, mock_engines):
         fake_lookup_service = FCSanLookupService()
-        fake_lookup_service.get_device_mapping_from_network = mock.Mock(
-            return_value=fake_fabric_mapping)
 
         zone_helper = fc_zone_helper.FCZoneHelper(
             fake_lookup_service, self.driver.client)
-        (tgt_port_wwns,
-         init_targ_map) = (zone_helper.build_ini_targ_map(
-             ['10000090fa0d6754']))
+        (tgt_wwns, portg_id, init_targ_map) = zone_helper.build_ini_targ_map(
+            ['10000090fa0d6754'], '1', '11')
         target_port_wwns = ['2000643e8c4c5f66']
-        ini_target_map = {'10000090fa0d6754': ['2000643e8c4c5f66']}
-        self.assertEqual(target_port_wwns, tgt_port_wwns)
-        self.assertEqual(ini_target_map, init_targ_map)
+        self.assertEqual(target_port_wwns, tgt_wwns)
+        self.assertEqual({}, init_targ_map)
 
-    def test_filter_port_by_contr(self):
+    @mock.patch.object(rest_client.RestClient, 'get_all_engines',
+                       return_value=[{'NODELIST': '["0A"]', 'ID': '0'},
+                                     {'NODELIST': '["0B"]', 'ID': '1'}])
+    def test_build_ini_targ_map_engie_not_recorded(self, mock_engines):
+        fake_lookup_service = FCSanLookupService()
 
-        # Six ports in one fabric.
-        ports_in_fabric = ['1', '2', '3', '4', '5', '6']
-        # Ports 1,3,4,7 belonged to controller A
-        # Ports 2,5,8 belonged to controller B
-        # ports 6 belonged to controller C
-        total_port_contr_map = {'1': 'A', '3': 'A', '4': 'A', '7': 'A',
-                                '2': 'B', '5': 'B', '8': 'B',
-                                '6': 'C'}
-        zone_helper = fc_zone_helper.FCZoneHelper(None, None)
-        filtered_ports = zone_helper._filter_port_by_contr(
-            ports_in_fabric, total_port_contr_map)
-        expected_filtered_ports = ['1', '3', '2', '5', '6']
-        self.assertEqual(expected_filtered_ports, filtered_ports)
+        zone_helper = fc_zone_helper.FCZoneHelper(
+            fake_lookup_service, self.driver.client)
+        (tgt_wwns, portg_id, init_targ_map) = zone_helper.build_ini_targ_map(
+            ['10000090fa0d6754'], '1', '11')
+        expected_wwns = ['2000643e8c4c5f66']
+        expected_map = {'10000090fa0d6754': ['2000643e8c4c5f66']}
+        self.assertEqual(expected_wwns, tgt_wwns)
+        self.assertEqual(expected_map, init_targ_map)
+
+    @mock.patch.object(rest_client.RestClient, 'get_all_engines',
+                       return_value=[{'NODELIST': '["0A", "0B"]', 'ID': '0'}])
+    def test_build_ini_targ_map_no_map(self, mock_engines):
+        fake_lookup_service = FCSanLookupService()
+
+        zone_helper = fc_zone_helper.FCZoneHelper(
+            fake_lookup_service, self.driver.client)
+        # Host with id '5' has no map on the array.
+        (tgt_wwns, portg_id, init_targ_map) = zone_helper.build_ini_targ_map(
+            ['10000090fa0d6754'], '5', '11')
+        expected_wwns = ['2000643e8c4c5f66']
+        expected_map = {'10000090fa0d6754': ['2000643e8c4c5f66']}
+        self.assertEqual(expected_wwns, tgt_wwns)
+        self.assertEqual(expected_map, init_targ_map)
+
+    def test_get_init_targ_map(self):
+        fake_lookup_service = FCSanLookupService()
+
+        zone_helper = fc_zone_helper.FCZoneHelper(
+            fake_lookup_service, self.driver.client)
+        (tgt_wwns, portg_id, init_targ_map) = zone_helper.get_init_targ_map(
+            ['10000090fa0d6754'], '1')
+        expected_wwns = ['2000643e8c4c5f66']
+        expected_map = {'10000090fa0d6754': ['2000643e8c4c5f66']}
+        self.assertEqual(expected_wwns, tgt_wwns)
+        self.assertEqual(expected_map, init_targ_map)
 
     def test_multi_resturls_success(self):
 
