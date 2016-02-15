@@ -72,7 +72,6 @@ from taskflow.patterns import linear_flow
 LOG = logging.getLogger(__name__)
 
 MIN_CLIENT_VERSION = '4.1.0'
-MIN_REP_CLIENT_VERSION = '4.0.2'
 DEDUP_API_VERSION = 30201120
 FLASH_CACHE_API_VERSION = 30201200
 SRSTATLD_API_VERSION = 30201200
@@ -225,10 +224,12 @@ class HPE3PARCommon(object):
         3.0.9 - Bump minimum API version for volume replication
         3.0.10 - Added additional volumes checks to the manage snapshot API
         3.0.11 - Fix the image cache capability bug #1491088
+        3.0.12 - Remove client version checks for replication
+        3.0.13 - Support creating a cg from a source cg
 
     """
 
-    VERSION = "3.0.11"
+    VERSION = "3.0.13"
 
     stats = {}
 
@@ -305,12 +306,7 @@ class HPE3PARCommon(object):
 
     def _create_client(self, timeout=None):
         hpe3par_api_url = self._client_conf['hpe3par_api_url']
-        # Timeout is only supported in version 4.0.2 and greater of the
-        # python-3parclient.
-        if hpe3parclient.version >= MIN_REP_CLIENT_VERSION:
-            cl = client.HPE3ParClient(hpe3par_api_url, timeout=timeout)
-        else:
-            cl = client.HPE3ParClient(hpe3par_api_url)
+        cl = client.HPE3ParClient(hpe3par_api_url, timeout=timeout)
         client_version = hpe3parclient.version
 
         if client_version < MIN_CLIENT_VERSION:
@@ -416,8 +412,7 @@ class HPE3PARCommon(object):
         except hpeexceptions.UnsupportedVersion as ex:
             # In the event we cannot contact the configured primary array,
             # we want to allow a failover if replication is enabled.
-            if hpe3parclient.version >= MIN_REP_CLIENT_VERSION:
-                self._do_replication_setup()
+            self._do_replication_setup()
             if self._replication_enabled:
                 self.client = None
             raise exception.InvalidInput(ex)
@@ -518,22 +513,35 @@ class HPE3PARCommon(object):
                                          cgsnapshot=None, snapshots=None,
                                          source_cg=None, source_vols=None):
 
+        self.create_consistencygroup(context, group)
+        vvs_name = self._get_3par_vvs_name(group.id)
         if cgsnapshot and snapshots:
-            self.create_consistencygroup(context, group)
-            vvs_name = self._get_3par_vvs_name(group.id)
             cgsnap_name = self._get_3par_snap_name(cgsnapshot.id)
-            for i, (volume, snapshot) in enumerate(zip(volumes, snapshots)):
-                snap_name = cgsnap_name + "-" + six.text_type(i)
-                volume_name = self._get_3par_vol_name(volume['id'])
-                type_info = self.get_volume_settings_from_type(volume)
-                cpg = type_info['cpg']
-                optional = {'online': True, 'snapCPG': cpg}
-                self.client.copyVolume(snap_name, volume_name, cpg, optional)
-                self.client.addVolumeToVolumeSet(vvs_name, volume_name)
-        else:
-            msg = _("create_consistencygroup_from_src only supports a"
-                    " cgsnapshot source, other sources cannot be used.")
-            raise exception.InvalidInput(reason=msg)
+            snap_base = cgsnap_name
+        elif source_cg and source_vols:
+            cg_id = source_cg.id
+            # Create a brand new uuid for the temp snap.
+            snap_uuid = uuid.uuid4().hex
+
+            # Create a temporary snapshot of the volume set in order to
+            # perform an online copy. These temp snapshots will be deleted
+            # when the source consistency group is deleted.
+            temp_snap = self._get_3par_snap_name(snap_uuid, temp_snap=True)
+            snap_shot_name = temp_snap + "-@count@"
+            copy_of_name = self._get_3par_vvs_name(cg_id)
+            optional = {'expirationHours': 1}
+            self.client.createSnapshotOfVolumeSet(snap_shot_name, copy_of_name,
+                                                  optional=optional)
+            snap_base = temp_snap
+
+        for i, volume in enumerate(volumes):
+            snap_name = snap_base + "-" + six.text_type(i)
+            volume_name = self._get_3par_vol_name(volume['id'])
+            type_info = self.get_volume_settings_from_type(volume)
+            cpg = type_info['cpg']
+            optional = {'online': True, 'snapCPG': cpg}
+            self.client.copyVolume(snap_name, volume_name, cpg, optional)
+            self.client.addVolumeToVolumeSet(vvs_name, volume_name)
 
         return None, None
 
@@ -1294,8 +1302,7 @@ class HPE3PARCommon(object):
                     'consistencygroup_support': True,
                     }
 
-            if (hpe3parclient.version >= MIN_REP_CLIENT_VERSION
-                    and remotecopy_support):
+            if remotecopy_support:
                 pool['replication_enabled'] = self._replication_enabled
                 pool['replication_type'] = ['sync', 'periodic']
                 pool['replication_count'] = len(self._replication_targets)
@@ -3155,8 +3162,7 @@ class HPE3PARCommon(object):
         return ret_mode
 
     def _get_3par_config(self, volume):
-        if hpe3parclient.version >= MIN_REP_CLIENT_VERSION:
-            self._do_replication_setup()
+        self._do_replication_setup()
         conf = None
         if self._replication_enabled and volume:
             provider_location = volume.get('provider_location')

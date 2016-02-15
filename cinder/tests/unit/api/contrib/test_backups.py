@@ -23,6 +23,7 @@ from xml.dom import minidom
 import ddt
 import mock
 from oslo_utils import timeutils
+import six
 import webob
 
 # needed for stubs to work
@@ -1220,7 +1221,7 @@ class BackupsAPITestCase(test.TestCase):
         self.assertEqual("Missing required element 'restore' in request body.",
                          res_dict['badRequest']['message'])
 
-    @mock.patch('cinder.volume.API.create')
+    @mock.patch('cinder.volume.api.API.create')
     def test_restore_backup_volume_id_unspecified(self,
                                                   _mock_volume_api_create):
 
@@ -1247,7 +1248,7 @@ class BackupsAPITestCase(test.TestCase):
         self.assertEqual(202, res.status_int)
         self.assertEqual(backup_id, res_dict['restore']['backup_id'])
 
-    @mock.patch('cinder.volume.API.create')
+    @mock.patch('cinder.volume.api.API.create')
     def test_restore_backup_name_specified(self,
                                            _mock_volume_api_create):
 
@@ -1792,6 +1793,8 @@ class BackupsAPITestCase(test.TestCase):
         _mock_list_services.return_value = [backup_service]
 
         req = webob.Request.blank('/v2/fake/backups/import_record')
+        if six.PY2:
+            backup_url = backup_url.encode('utf-8')
         req.body = ('<backup-record backup_service="%(backup_service)s" '
                     'backup_url="%(backup_url)s"/>') \
             % {'backup_url': backup_url,
