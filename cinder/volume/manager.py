@@ -49,7 +49,7 @@ from oslo_utils import importutils
 from oslo_utils import timeutils
 from oslo_utils import units
 from oslo_utils import uuidutils
-from osprofiler import profiler
+profiler = importutils.try_import('osprofiler.profiler')
 import six
 from taskflow import exceptions as tfe
 
@@ -247,7 +247,8 @@ class VolumeManager(manager.SchedulerDependentManager):
             host=self.host,
             is_vol_db_empty=vol_db_empty)
 
-        self.driver = profiler.trace_cls("driver")(self.driver)
+        if CONF.profiler.profiler_enabled and profiler is not None:
+            self.driver = profiler.trace_cls("driver")(self.driver)
         try:
             self.extra_capabilities = jsonutils.loads(
                 self.driver.configuration.extra_capabilities)
