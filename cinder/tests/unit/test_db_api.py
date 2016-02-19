@@ -1719,6 +1719,15 @@ class DBAPIQuotaClassTestCase(BaseTest):
         updated = db.quota_class_get(self.ctxt, 'test_qc', 'test_resource')
         self.assertEqual(43, updated['hard_limit'])
 
+    def test_quota_class_update_resource(self):
+        old = db.quota_class_get(self.ctxt, 'test_qc', 'test_resource')
+        db.quota_class_update_resource(self.ctxt,
+                                       'test_resource',
+                                       'test_resource1')
+        new = db.quota_class_get(self.ctxt, 'test_qc', 'test_resource1')
+        self.assertEqual(old.id, new.id)
+        self.assertEqual('test_resource1', new.resource)
+
     def test_quota_class_destroy_all_by_name(self):
         db.quota_class_create(self.ctxt, 'test2', 'res1', 43)
         db.quota_class_create(self.ctxt, 'test2', 'res2', 44)
@@ -1760,6 +1769,13 @@ class DBAPIQuotaTestCase(BaseTest):
         self.assertEqual(42, quota.hard_limit)
         self.assertEqual('resource1', quota.resource)
         self.assertEqual('project1', quota.project_id)
+
+    def test_quota_update_resource(self):
+        old = db.quota_create(self.ctxt, 'project1', 'resource1', 41)
+        db.quota_update_resource(self.ctxt, 'resource1', 'resource2')
+        new = db.quota_get(self.ctxt, 'project1', 'resource2')
+        self.assertEqual(old.id, new.id)
+        self.assertEqual('resource2', new.resource)
 
     def test_quota_update_nonexistent(self):
         self.assertRaises(exception.ProjectQuotaNotFound,
@@ -1900,7 +1916,8 @@ class DBAPIBackupTestCase(BaseTest):
             'temp_volume_id': 'temp_volume_id',
             'temp_snapshot_id': 'temp_snapshot_id',
             'num_dependent_backups': 0,
-            'snapshot_id': 'snapshot_id', }
+            'snapshot_id': 'snapshot_id',
+            'restore_volume_id': 'restore_volume_id'}
         if one:
             return base_values
 
