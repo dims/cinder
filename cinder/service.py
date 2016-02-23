@@ -286,20 +286,23 @@ class Service(service.Service):
             self.rpcserver.stop()
         except Exception:
             pass
+
+        self.timers_skip = []
         for x in self.timers:
             try:
                 x.stop()
             except Exception:
-                pass
-        self.timers = []
+                self.timers_skip.append(x)
         super(Service, self).stop()
 
     def wait(self):
+        skip = getattr(self, 'timers_skip', [])
         for x in self.timers:
-            try:
-                x.wait()
-            except Exception:
-                pass
+            if x not in skip:
+                try:
+                    x.wait()
+                except Exception:
+                    pass
         if self.rpcserver:
             self.rpcserver.wait()
 
@@ -358,6 +361,10 @@ class Service(service.Service):
             if not getattr(self, 'model_disconnected', False):
                 self.model_disconnected = True
                 LOG.exception(_LE('Exception encountered: '))
+
+    def reset(self):
+        self.manager.reset()
+        super(Service, self).reset()
 
 
 class WSGIService(service.ServiceBase):

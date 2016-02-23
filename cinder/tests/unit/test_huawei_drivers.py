@@ -1133,7 +1133,7 @@ MAP_COMMAND_TO_FAKE_RESPONSE['/sessions'] = (
 MAP_COMMAND_TO_FAKE_RESPONSE['/LUN_MIGRATION/POST'] = (
     FAKE_COMMON_SUCCESS_RESPONSE)
 
-MAP_COMMAND_TO_FAKE_RESPONSE['/LUN_MIGRATION?range=[0-100]/GET'] = (
+MAP_COMMAND_TO_FAKE_RESPONSE['/LUN_MIGRATION?range=[0-256]/GET'] = (
     FAKE_GET_LUN_MIGRATION_RESPONSE)
 
 MAP_COMMAND_TO_FAKE_RESPONSE['/LUN_MIGRATION/11/DELETE'] = (
@@ -1421,7 +1421,7 @@ MAP_COMMAND_TO_FAKE_RESPONSE['/fc_port/GET'] = (
 MAP_COMMAND_TO_FAKE_RESPONSE['/fc_initiator/GET'] = (
     FAKE_GET_FC_PORT_RESPONSE)
 
-MAP_COMMAND_TO_FAKE_RESPONSE['fc_initiator?range=[0-100]/GET'] = (
+MAP_COMMAND_TO_FAKE_RESPONSE['fc_initiator?range=[0-256]/GET'] = (
     FAKE_GET_FC_PORT_RESPONSE)
 
 MAP_COMMAND_TO_FAKE_RESPONSE['/fc_initiator?PARENTTYPE=21&PARENTID=1/GET'] = (
@@ -1430,7 +1430,7 @@ MAP_COMMAND_TO_FAKE_RESPONSE['/fc_initiator?PARENTTYPE=21&PARENTID=1/GET'] = (
 MAP_COMMAND_TO_FAKE_RESPONSE['/lun/associate/cachepartition/POST'] = (
     FAKE_SYSTEM_VERSION_RESPONSE)
 
-MAP_COMMAND_TO_FAKE_RESPONSE['/fc_initiator?range=[0-100]&PARENTID=1/GET'] = (
+MAP_COMMAND_TO_FAKE_RESPONSE['/fc_initiator?range=[0-256]&PARENTID=1/GET'] = (
     FAKE_GET_FC_PORT_RESPONSE)
 
 MAP_COMMAND_TO_FAKE_RESPONSE['/fc_initiator?PARENTTYPE=21&PARENTID=1/GET'] = (
@@ -1445,7 +1445,7 @@ MAP_COMMAND_TO_FAKE_RESPONSE['/SMARTCACHEPARTITION/REMOVE_ASSOCIATE/PUT'] = (
 MAP_COMMAND_TO_FAKE_RESPONSE['/cachepartition/0/GET'] = (
     FAKE_SMARTCACHEPARTITION_RESPONSE)
 
-MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroDomain?range=[0-100]/GET'] = (
+MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroDomain?range=[0-32]/GET'] = (
     FAKE_HYPERMETRODOMAIN_RESPONSE)
 
 MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroPair/POST'] = (
@@ -1463,10 +1463,10 @@ MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroPair/11/DELETE'] = (
 MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroPair/1/GET'] = (
     FAKE_HYPERMETRO_RESPONSE)
 
-MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroPair?range=[0-100]/GET'] = (
+MAP_COMMAND_TO_FAKE_RESPONSE['/HyperMetroPair?range=[0-65535]/GET'] = (
     FAKE_COMMON_SUCCESS_RESPONSE)
 
-MAP_COMMAND_TO_FAKE_RESPONSE['/splitmirror?range=[0-100]/GET'] = (
+MAP_COMMAND_TO_FAKE_RESPONSE['/splitmirror?range=[0-512]/GET'] = (
     FAKE_COMMON_SUCCESS_RESPONSE)
 
 FACK_GET_PORTG_BY_VIEW = """
@@ -3472,6 +3472,16 @@ class HuaweiFCDriverTestCase(test.TestCase):
                     "remote_lun_id": '1'}
         lun_info = self.driver.create_volume(hyper_volume)
         self.assertEqual(metadata, lun_info['metadata'])
+
+    @mock.patch.object(rest_client.RestClient, 'call',
+                       return_value={"data": [{"RUNNINGSTATUS": "27",
+                                               "ID": '1'},
+                                              {"RUNNINGSTATUS": "26",
+                                               "ID": '2'}],
+                                     "error": {"code": 0}})
+    def test_get_online_free_wwns(self, mock_call):
+        wwns = self.driver.client.get_online_free_wwns()
+        self.assertEqual(['1'], wwns)
 
 
 class HuaweiConfTestCase(test.TestCase):
